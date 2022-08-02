@@ -5,13 +5,14 @@ import (
 	"os"
 	"time"
 
+	"go.etcd.io/etcd/raft/v3"
+
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftengine"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/internal/transport"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/raft/v3"
 )
 
 // None is a placeholder node ID used to identify non-existence.
@@ -35,6 +36,16 @@ type MemberType = raftpb.MemberType
 
 // RawMember represents a raft cluster member and holds its metadata.
 type RawMember = raftpb.Member
+
+type StateType = raft.StateType
+
+// Possible values for StateType.
+const (
+	StateFollower     = raft.StateFollower
+	StateCandidate    = raft.StateCandidate
+	StateLeader       = raft.StateLeader
+	StatePreCandidate = raft.StatePreCandidate
+)
 
 // Member represents a raft cluster member.
 type Member interface {
@@ -173,7 +184,9 @@ func WithElectionTick(tick int) Option {
 }
 
 // WithHeartbeatTick is the number of node tick (WithTickInterval) invocations that
-//  must pass between heartbeats. That is, a leader sends heartbeat messages to
+//
+//	must pass between heartbeats. That is, a leader sends heartbeat messages to
+//
 // maintain its leadership every HeartbeatTick ticks.
 //
 // Default Value: 1.
@@ -288,6 +301,12 @@ func WithLogger(lg raftlog.Logger) Option {
 	})
 }
 
+func WithStateChangeCh(ch chan raft.StateType) Option {
+	return optionFunc(func(c *config) {
+		c.stateChangeCh = ch
+	})
+}
+
 // WithPipelining is the process to send successive requests,
 // over the same persistent connection, without waiting for the answer.
 // This avoids latency of the connection. Theoretically,
@@ -364,11 +383,11 @@ func WithRestart() StartOption {
 // WithMembers and WithInitCluster must be applied to all cluster nodes when they are composed,
 // Otherwise, the quorum will be lost and the cluster become unavailable.
 //
-//  Node A:
-//  n.Start(WithInitCluster(), WithMembers(<node A>, <node B>))
+//	Node A:
+//	n.Start(WithInitCluster(), WithMembers(<node A>, <node B>))
 //
-//  Node B:
-//  n.Start(WithInitCluster(), WithMembers(<node B>, <node A>))
+//	Node B:
+//	n.Start(WithInitCluster(), WithMembers(<node B>, <node A>))
 //
 // Note: first member will be assigned to the current node.
 func WithMembers(membs ...RawMember) StartOption {
@@ -387,11 +406,10 @@ func WithAddress(addr string) StartOption {
 
 // WithFallback can be used if other options do not succeed.
 //
-// 	WithFallback(
+//	WithFallback(
 //		WithJoin(),
 //		WithRestart,
 //	)
-//
 func WithFallback(opts ...StartOption) StartOption {
 	return startOptionFunc(func(c *startConfig) {
 		// create new startConfig annd apply all opts,
@@ -438,6 +456,7 @@ type config struct {
 	fsm              StateMachine
 	logger           raftlog.Logger
 	pipelining       bool
+	stateChangeCh    chan raft.StateType
 }
 
 func (c *config) Logger() raftlog.Logger {
@@ -514,6 +533,10 @@ func (c *config) Mux() raftengine.Mux {
 
 func (c *config) AllowPipelining() bool {
 	return c.pipelining
+}
+
+func (c *config) StateChangeCh() chan raft.StateType {
+	return c.stateChangeCh
 }
 
 func newConfig(opts ...Option) *config {
