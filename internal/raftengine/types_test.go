@@ -170,6 +170,10 @@ func (m *MockConfig) Logger() raftlog.Logger {
 	return ret0
 }
 
+func (m *MockConfig) StateChangeCh() chan v3.StateType {
+	return nil
+}
+
 // Logger indicates an expected call of Logger.
 func (mr *MockConfigMockRecorder) Logger() *gomock.Call {
 	mr.mock.ctrl.T.Helper()

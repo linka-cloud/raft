@@ -6,13 +6,14 @@ import (
 	"io"
 	"time"
 
+	"go.etcd.io/etcd/raft/v3"
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/internal/transport"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 //go:generate mockgen -package raftengine  -source internal/raftengine/types.go -destination internal/raftengine/types_test.go
@@ -35,6 +36,7 @@ type Config interface {
 	TickInterval() time.Duration
 	StateMachine() StateMachine
 	Context() context.Context
+	StateChangeCh() chan raft.StateType
 	DrainTimeout() time.Duration
 	GroupID() uint64
 	Logger() raftlog.Logger

@@ -8,15 +8,16 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/pkg/v3/idutil"
+	"go.etcd.io/etcd/raft/v3"
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/atomic"
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/msgbus"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/pkg/v3/idutil"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 var (
@@ -59,6 +60,7 @@ func New(cfg Config) Engine {
 	d.appliedIndex = atomic.NewUint64()
 	d.snapIndex = atomic.NewUint64()
 	d.logger = cfg.Logger()
+	d.stateCh = cfg.StateChangeCh()
 	return d
 }
 
@@ -91,6 +93,7 @@ type engine struct {
 	snapshotc    chan chan error
 	confState    *etcdraftpb.ConfState
 	logger       raftlog.Logger
+	stateCh      chan<- raft.StateType
 }
 
 func (eng *engine) LinearizableRead(ctx context.Context) error {
@@ -420,8 +423,15 @@ func (eng *engine) eventLoop() error {
 
 			eng.send(rd.Messages)
 
-			if rd.SoftState != nil && rd.SoftState.Lead == raft.None {
-				eng.msgbus.BroadcastToAll(ErrNoLeader)
+			if rd.SoftState != nil {
+				if rd.SoftState.Lead == raft.None {
+					eng.msgbus.BroadcastToAll(ErrNoLeader)
+				}
+				go func() {
+					if eng.stateCh != nil {
+						eng.stateCh <- rd.SoftState.RaftState
+					}
+				}()
 			}
 
 			eng.publishCommitted(rd.CommittedEntries)

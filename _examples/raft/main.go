@@ -17,10 +17,11 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"google.golang.org/grpc"
+
 	"github.com/shaj13/raft"
 	"github.com/shaj13/raft/transport"
 	"github.com/shaj13/raft/transport/raftgrpc"
-	"google.golang.org/grpc"
 )
 
 var (
@@ -32,6 +33,7 @@ var (
 	fsm        *stateMachine
 	httpAddr   string
 	raftAddr   string
+	stateCh    chan raft.StateType
 )
 
 func init() {
@@ -42,7 +44,8 @@ func init() {
 	flag.Parse()
 
 	startOpts = append(startOpts, raft.WithAddress(*addr))
-	opts = append(opts, raft.WithStateDIR(*state))
+	stateCh = make(chan raft.StateType, 1)
+	opts = append(opts, raft.WithStateDIR(*state), raft.WithStateChangeCh(stateCh))
 	if *join != "" {
 		opt := raft.WithFallback(
 			raft.WithJoin(*join, time.Second),
@@ -86,6 +89,16 @@ func main() {
 		err = raftServer.Serve(lis)
 		if err != nil {
 			log.Fatal(err)
+		}
+	}()
+
+	go func() {
+		last := raft.StateType(0)
+		for s := range stateCh {
+			if s != last {
+				log.Printf("node state changed from %v to %v", last, s)
+				last = s
+			}
 		}
 	}()
 

@@ -5,13 +5,14 @@ import (
 	"os"
 	"time"
 
+	"go.etcd.io/etcd/raft/v3"
+
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftengine"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/internal/transport"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/raft/v3"
 )
 
 // None is a placeholder node ID used to identify non-existence.
@@ -35,6 +36,8 @@ type MemberType = raftpb.MemberType
 
 // RawMember represents a raft cluster member and holds its metadata.
 type RawMember = raftpb.Member
+
+type StateType = raft.StateType
 
 // Member represents a raft cluster member.
 type Member interface {
@@ -288,6 +291,12 @@ func WithLogger(lg raftlog.Logger) Option {
 	})
 }
 
+func WithStateChangeCh(ch chan raft.StateType) Option {
+	return optionFunc(func(c *config) {
+		c.stateChangeCh = ch
+	})
+}
+
 // WithPipelining is the process to send successive requests,
 // over the same persistent connection, without waiting for the answer.
 // This avoids latency of the connection. Theoretically,
@@ -438,6 +447,7 @@ type config struct {
 	fsm              StateMachine
 	logger           raftlog.Logger
 	pipelining       bool
+	stateChangeCh    chan raft.StateType
 }
 
 func (c *config) Logger() raftlog.Logger {
@@ -514,6 +524,10 @@ func (c *config) Mux() raftengine.Mux {
 
 func (c *config) AllowPipelining() bool {
 	return c.pipelining
+}
+
+func (c *config) StateChangeCh() chan raft.StateType {
+	return c.stateChangeCh
 }
 
 func newConfig(opts ...Option) *config {
