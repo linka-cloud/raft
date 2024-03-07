@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -19,11 +18,12 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"google.golang.org/grpc"
+
 	"github.com/shaj13/raft"
 	"github.com/shaj13/raft/raftlog"
 	"github.com/shaj13/raft/transport"
 	"github.com/shaj13/raft/transport/raftgrpc"
-	"google.golang.org/grpc"
 )
 
 var (
@@ -166,7 +166,7 @@ func removeNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func newGroup(w http.ResponseWriter, r *http.Request) {
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -203,7 +203,7 @@ func save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -261,11 +261,11 @@ type stateMachine struct {
 	kv map[string]string
 }
 
-func (s *stateMachine) Apply(data []byte) {
+func (s *stateMachine) Apply(data []byte) error {
 	var rep replicate
 	if err := json.Unmarshal(data, &rep); err != nil {
 		log.Println("unable to Unmarshal replicate", err)
-		return
+		return err
 	}
 
 	switch rep.CMD {
@@ -273,7 +273,7 @@ func (s *stateMachine) Apply(data []byte) {
 		var e entry
 		if err := json.Unmarshal(rep.Data, &e); err != nil {
 			log.Println("unable to Unmarshal entry", err)
-			return
+			return err
 		}
 
 		s.mu.Lock()
@@ -283,7 +283,7 @@ func (s *stateMachine) Apply(data []byte) {
 		var c createGroup
 		if err := json.Unmarshal(rep.Data, &c); err != nil {
 			log.Println("unable to Unmarshal createGroup", err)
-			return
+			return err
 		}
 
 		myid := raftgroups.getNode(initGroupID).raftnode.Whoami()
@@ -297,7 +297,7 @@ func (s *stateMachine) Apply(data []byte) {
 
 		if !found {
 			raftlog.Info("ignore create group cmd; this node not part of it.")
-			return
+			return nil
 		}
 
 		addr := c.JoinAddr
@@ -310,6 +310,7 @@ func (s *stateMachine) Apply(data []byte) {
 
 		raftgroups.createAndStart(c.GroupID, addr)
 	}
+	return nil
 }
 
 func (s *stateMachine) Snapshot() (io.ReadCloser, error) {
@@ -326,7 +327,7 @@ func (s *stateMachine) Restore(r io.ReadCloser) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}

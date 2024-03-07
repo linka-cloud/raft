@@ -1,7 +1,8 @@
 package disk
 
 import (
-	"io/ioutil"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,10 +64,10 @@ func TestSnapshotterReaderWriter(t *testing.T) {
 func TestSnapshotterReadWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/" + snapshotName(1, 1)
-	buf, err := ioutil.ReadFile("./testdata/valid.snap")
+	buf, err := os.ReadFile("./testdata/valid.snap")
 	require.NoError(t, err)
 
-	err = ioutil.WriteFile(path, buf, 0600)
+	err = os.WriteFile(path, buf, 0600)
 	require.NoError(t, err)
 
 	shotter := new(snapshotter)
@@ -80,6 +81,6 @@ func TestSnapshotterReadWrite(t *testing.T) {
 
 	snap, err = shotter.ReadFrom(path)
 	require.NoError(t, err)
-	buf, _ = ioutil.ReadAll(snap.Data)
+	buf, _ = io.ReadAll(snap.Data)
 	require.Equal(t, "some app data", string(buf))
 }

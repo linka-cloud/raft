@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"strings"
@@ -13,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
 	raft "github.com/shaj13/raft"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"
 	etransport "github.com/shaj13/raft/transport"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 // canceledctx is a reusable canceled context.
@@ -378,16 +378,17 @@ type stateMachine struct {
 	kv map[int]int
 }
 
-func (s *stateMachine) Apply(data []byte) {
+func (s *stateMachine) Apply(data []byte) error {
 	var e entry
 	if err := json.Unmarshal(data, &e); err != nil {
 		log.Println("unable to Unmarshal entry", err)
-		return
+		return err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.kv[e.Key] = e.Value
+	return nil
 }
 
 func (s *stateMachine) Snapshot() (io.ReadCloser, error) {
@@ -404,7 +405,7 @@ func (s *stateMachine) Restore(r io.ReadCloser) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,7 @@
 package disk
 
 import (
-	"io/ioutil"
+	"os"
 	"sort"
 	"strings"
 )
@@ -13,7 +13,7 @@ const (
 )
 
 func list(path, ext string) ([]string, error) {
-	ls, err := ioutil.ReadDir(path)
+	ls, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}

@@ -1,17 +1,18 @@
 package disk
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
 	"github.com/stretchr/testify/require"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/server/v3/wal/walpb"
+
+	"github.com/shaj13/raft/internal/raftpb"
+	"github.com/shaj13/raft/internal/storage"
 )
 
 func TestSnapshotCodec(t *testing.T) {
@@ -28,7 +29,7 @@ func TestSnapshotCodec(t *testing.T) {
 	require.Equal(t, expected.Raw, got.Raw)
 	require.Equal(t, expected.Members, got.Members)
 
-	gotData, err := ioutil.ReadAll(got.Data)
+	gotData, err := io.ReadAll(got.Data)
 	require.NoError(t, err)
 	require.Equal(t, expectedData, string(gotData))
 }
@@ -120,6 +121,6 @@ func snapshotTestFile() (storage.Snapshot, string) {
 				},
 			},
 		},
-		Data: ioutil.NopCloser(strings.NewReader(data)),
+		Data: io.NopCloser(strings.NewReader(data)),
 	}, data
 }
