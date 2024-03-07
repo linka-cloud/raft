@@ -46,7 +46,7 @@ type Config interface {
 // application to make use of the raft replicated log.
 type StateMachine interface {
 	// Apply committed raft log entry.
-	Apply([]byte)
+	Apply([]byte) error
 
 	// Snapshot is used to write the current state to a snapshot file,
 	// on stable storage and compacting the raft logs.

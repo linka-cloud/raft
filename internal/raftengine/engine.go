@@ -568,7 +568,8 @@ func (eng *engine) publishReplicate(ent etcdraftpb.Entry) {
 
 	eng.logger.V(1).Infof("raft.engine: publishing replicate data, change id => %d", r.CID)
 
-	eng.fsm.Apply(r.Data)
+	err = eng.fsm.Apply(r.Data)
+	return
 }
 
 func (eng *engine) publishConfChange(ent etcdraftpb.Entry) {
