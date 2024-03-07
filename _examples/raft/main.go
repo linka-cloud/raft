@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -45,7 +44,14 @@ func init() {
 
 	startOpts = append(startOpts, raft.WithAddress(*addr))
 	stateCh = make(chan raft.StateType, 1)
-	opts = append(opts, raft.WithStateDIR(*state), raft.WithStateChangeCh(stateCh))
+	opts = append(
+		opts,
+		raft.WithStateDIR(*state),
+		raft.WithStateChangeCh(stateCh),
+		raft.WithPreVote(),
+		raft.WithCheckQuorum(),
+		raft.WithTickInterval(10*time.Millisecond),
+	)
 	if *join != "" {
 		opt := raft.WithFallback(
 			raft.WithJoin(*join, time.Second),
@@ -176,7 +182,7 @@ func removeNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func save(w http.ResponseWriter, r *http.Request) {
-	buf, err := ioutil.ReadAll(r.Body)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -209,16 +215,17 @@ type stateMachine struct {
 	kv map[string]string
 }
 
-func (s *stateMachine) Apply(data []byte) {
+func (s *stateMachine) Apply(data []byte) error {
 	var e entry
 	if err := json.Unmarshal(data, &e); err != nil {
 		log.Println("unable to Unmarshal entry", err)
-		return
+		return err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.kv[e.Key] = e.Value
+	return nil
 }
 
 func (s *stateMachine) Snapshot() (io.ReadCloser, error) {
@@ -235,7 +242,7 @@ func (s *stateMachine) Restore(r io.ReadCloser) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}

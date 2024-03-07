@@ -3,15 +3,15 @@ package rafthttp
 import (
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strconv"
+
+	"go.etcd.io/etcd/pkg/v3/pbutil"
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/pkg/v3/pbutil"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 // NewHandlerFunc retur'ns func that create an http transport handler.
@@ -151,7 +151,7 @@ func mux(s *handler, basePath string) http.Handler {
 }
 
 func decode(r io.Reader, u pbutil.Unmarshaler) (int, error) {
-	data, err := ioutil.ReadAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return http.StatusPreconditionFailed, err
 	}

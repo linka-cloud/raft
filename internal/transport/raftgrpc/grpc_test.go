@@ -6,20 +6,20 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"strings"
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	transportmock "github.com/shaj13/raft/internal/mocks/transport"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/transport/raftgrpc/pb"
-	"github.com/shaj13/raft/raftlog"
 	"github.com/stretchr/testify/require"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
+
+	transportmock "github.com/shaj13/raft/internal/mocks/transport"
+	"github.com/shaj13/raft/internal/raftpb"
+	"github.com/shaj13/raft/internal/transport/raftgrpc/pb"
+	"github.com/shaj13/raft/raftlog"
 )
 
 const testGroupID = uint64(1)
@@ -126,7 +126,7 @@ func TestSnapshot(t *testing.T) {
 			rpcCtrl.
 				EXPECT().
 				SnapshotReader(gomock.Eq(testGroupID), gomock.Any(), gomock.Any()).
-				Return(ioutil.NopCloser(strings.NewReader(snapData)), nil)
+				Return(io.NopCloser(strings.NewReader(snapData)), nil)
 			rpcCtrl.
 				EXPECT().
 				SnapshotWriter(gomock.Eq(testGroupID), gomock.Any(), gomock.Any()).
