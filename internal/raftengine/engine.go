@@ -546,7 +546,7 @@ func (eng *engine) publishReplicate(ent etcdraftpb.Entry) {
 	defer func() {
 		eng.msgbus.Broadcast(r.CID, err)
 		if err != nil {
-			eng.logger.Warning(
+			eng.logger.Warningf(
 				"raft.engine: publishing replicate data: %v",
 				err,
 			)
