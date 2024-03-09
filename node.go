@@ -25,6 +25,8 @@ var (
 	// ErrNotLeader is returned when an operation can't be completed on a
 	// follower or candidate node
 	ErrNotLeader = errors.New("raft: node is not the leader")
+
+	ErrAlreadySnapshotting = raftengine.ErrAlreadySnapshotting
 )
 
 // NewNode construct a new node from the given configuration.
