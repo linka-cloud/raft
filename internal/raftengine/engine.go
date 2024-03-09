@@ -27,6 +27,12 @@ var (
 	// ErrNoLeader is returned by the Engine methods when leader lost, or
 	// no elected cluster leader.
 	ErrNoLeader = errors.New("raft: no elected cluster leader")
+	// ErrAlreadySnapshotting can be returned by the StateMachine.Snapshot method
+	// or the ForceSnapshot method to indicate that a snapshot is already in progress.
+	ErrAlreadySnapshotting = errors.New("raft: already snapshotting")
+	// ErrFailedPrecondition can be returned by the StateMachine.Snapshot method
+	// to indicate that the precondition for creating a snapshot is not met.
+	ErrFailedPrecondition = errors.New("raft: precondition failed")
 )
 
 //go:generate mockgen -package raftenginemock  -source internal/raftengine/engine.go -destination internal/mocks/raftengine/engine.go
@@ -59,6 +65,7 @@ func New(cfg Config) Engine {
 	d.started = atomic.NewBool()
 	d.appliedIndex = atomic.NewUint64()
 	d.snapIndex = atomic.NewUint64()
+	d.snapshoting = atomic.NewBool()
 	d.logger = cfg.Logger()
 	d.stateCh = cfg.StateChangeCh()
 	return d
@@ -87,6 +94,7 @@ type engine struct {
 	pool         membership.Pool
 	started      *atomic.Bool
 	snapIndex    *atomic.Uint64
+	snapshoting  *atomic.Bool
 	appliedIndex *atomic.Uint64
 	proposec     chan etcdraftpb.Message
 	msgc         chan etcdraftpb.Message
@@ -768,7 +776,7 @@ func (eng *engine) forceSnapshot(msg etcdraftpb.Message) bool {
 }
 
 func (eng *engine) maybeCreateSnapshot() {
-	if eng.appliedIndex.Get()-eng.snapIndex.Get() <= eng.cfg.SnapInterval() {
+	if eng.appliedIndex.Get()-eng.snapIndex.Get() <= eng.cfg.SnapInterval() || eng.snapshoting.True() {
 		return
 	}
 
@@ -789,19 +797,27 @@ func (eng *engine) createSnapshot() error {
 		return nil
 	}
 
+	if eng.snapshoting.True() {
+		return ErrAlreadySnapshotting
+	}
+
+	eng.snapshoting.Set()
+
+	r, err := eng.fsm.Snapshot()
+	if err != nil {
+		eng.snapshoting.UnSet()
+		return err
+	}
+
 	eng.logger.Infof(
 		"raft.engine: start snapshot [applied index: %d | last snapshot index: %d]",
 		appliedIndex,
 		snapIndex,
 	)
 
-	r, err := eng.fsm.Snapshot()
-	if err != nil {
-		return err
-	}
-
 	snap, err := eng.cache.CreateSnapshot(appliedIndex, eng.confState, nil)
 	if err != nil {
+		eng.snapshoting.UnSet()
 		return err
 	}
 
@@ -813,26 +829,44 @@ func (eng *engine) createSnapshot() error {
 		Data: r,
 	}
 
-	if err := eng.storage.Snapshotter().Write(&ss); err != nil {
-		return err
-	}
-
 	if err := eng.storage.SaveSnapshot(snap); err != nil {
 		return err
 	}
 
-	eng.snapIndex.Set(appliedIndex)
+	fn := func() error {
+		defer eng.snapshoting.UnSet()
 
-	if appliedIndex <= eng.cfg.SnapInterval() {
+		if err := eng.storage.Snapshotter().Write(&ss); err != nil {
+			return err
+		}
+
+		eng.snapIndex.Set(appliedIndex)
+
+		if appliedIndex <= eng.cfg.SnapInterval() {
+			return nil
+		}
+
+		compactIndex := appliedIndex - eng.cfg.SnapInterval()
+		if err := eng.cache.Compact(compactIndex); err != nil {
+			return err
+		}
+
+		eng.logger.Infof("raft.engine: compacted log at index %d", compactIndex)
 		return nil
 	}
 
-	compactIndex := appliedIndex - eng.cfg.SnapInterval()
-	if err := eng.cache.Compact(compactIndex); err != nil {
-		return err
-	}
-
-	eng.logger.Infof("raft.engine: compacted log at index %d", compactIndex)
+	eng.wg.Add(1)
+	go func() {
+		defer eng.wg.Done()
+		if err := fn(); err != nil {
+			eng.snapIndex.Set(snapIndex)
+			eng.logger.Errorf(
+				"raft.engine: creating new snapshot at index %s failed: %v",
+				eng.appliedIndex,
+				err,
+			)
+		}
+	}()
 	return nil
 }
 
