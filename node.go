@@ -8,6 +8,8 @@ import (
 	"math"
 	"time"
 
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftengine"
 	"github.com/shaj13/raft/internal/raftpb"
@@ -15,7 +17,6 @@ import (
 	"github.com/shaj13/raft/internal/storage/disk"
 	"github.com/shaj13/raft/internal/transport"
 	etransport "github.com/shaj13/raft/transport"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 var (
@@ -25,8 +26,12 @@ var (
 	// ErrNotLeader is returned when an operation can't be completed on a
 	// follower or candidate node
 	ErrNotLeader = errors.New("raft: node is not the leader")
-
+	// ErrAlreadySnapshotting can be returned by the StateMachine.Snapshot method
+	// to indicate that a snapshot is already in progress.
 	ErrAlreadySnapshotting = raftengine.ErrAlreadySnapshotting
+	// ErrFailedPrecondition can be returned by the StateMachine.Snapshot method
+	// to indicate that the precondition for creating a snapshot is not met.
+	ErrFailedPrecondition = raftengine.ErrFailedPrecondition
 )
 
 // NewNode construct a new node from the given configuration.
@@ -145,8 +150,8 @@ func (ng *NodeGroup) Create(groupID uint64, fsm StateMachine, opts ...Option) *N
 // after the removal, the actual node will become idle,
 // it must coordinate with node shutdown explicitly.
 //
-// 	nodeGroup.Remove(12)
-// 	node.Shutdown(ctx)
+//	nodeGroup.Remove(12)
+//	node.Shutdown(ctx)
 func (ng *NodeGroup) Remove(groupID uint64) {
 	ng.router.remove(groupID)
 }

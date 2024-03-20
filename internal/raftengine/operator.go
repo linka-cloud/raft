@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
 	"go.etcd.io/etcd/pkg/v3/pbutil"
 	"go.etcd.io/etcd/raft/v3"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
+	"github.com/shaj13/raft/internal/raftpb"
+	"github.com/shaj13/raft/internal/storage"
 )
 
 // order define a weight to operators to obtain the execution order.
