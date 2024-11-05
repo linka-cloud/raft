@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shaj13/raft/raftlog"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
-	"go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/server/v3/wal"
 	"go.etcd.io/etcd/server/v3/wal/walpb"
+	"go.etcd.io/raft/v3/raftpb"
+
+	"github.com/shaj13/raft/raftlog"
 )
 
 func TestDiskWalInteraction(t *testing.T) {
@@ -28,7 +29,7 @@ func TestDiskWalInteraction(t *testing.T) {
 	// create wal and append data using disk objec.
 	w, _ := wal.Create(nil, dir, nil)
 	disk := newTestDisk("")
-	disk.wal = w
+	disk.DiskStorage = w
 
 	err := disk.SaveSnapshot(sf.Raw)
 	require.NoError(t, err)

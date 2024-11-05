@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"go.etcd.io/etcd/pkg/v3/pbutil"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
@@ -88,7 +88,7 @@ type forceJoin struct {
 	timeout time.Duration
 }
 
-func (f forceJoin) before(ost *operatorsState) error {
+func (f forceJoin) before(ctx context.Context, ost *operatorsState) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), f.timeout)
 	defer cancel()
 
@@ -106,15 +106,15 @@ func (f forceJoin) before(ost *operatorsState) error {
 	return nil
 }
 
-func (f forceJoin) after(ost *operatorsState) error {
+func (f forceJoin) after(ctx context.Context, ost *operatorsState) error {
 	for _, mem := range ost.membs {
-		if err := ost.eng.pool.Add(mem); err != nil {
+		if err := ost.eng.pool.Add(ctx, mem); err != nil {
 			return err
 		}
 	}
 
 	r := restart{bootstrap: bootstrap}
-	return r.after(ost)
+	return r.after(ctx, ost)
 }
 
 func (f forceJoin) String() string {
@@ -125,11 +125,11 @@ type join struct {
 	forceJoin
 }
 
-func (j join) before(ost *operatorsState) error {
+func (j join) before(ctx context.Context, ost *operatorsState) error {
 	if ost.hasExistingState {
 		return errors.New("raft: this node is already part of a cluster")
 	}
-	return j.forceJoin.before(ost)
+	return j.forceJoin.before(ctx, ost)
 }
 
 func (j join) String() string {
@@ -140,14 +140,14 @@ type initCluster struct {
 	bootstrap bootstrapFunc
 }
 
-func (c initCluster) before(ost *operatorsState) error {
+func (c initCluster) before(ctx context.Context, ost *operatorsState) error {
 	if ost.hasExistingState {
 		return errors.New("raft: cluster is already exist")
 	}
 	return nil
 }
 
-func (c initCluster) after(ost *operatorsState) error {
+func (c initCluster) after(ctx context.Context, ost *operatorsState) error {
 	membs := ost.membs
 	membs = append([]raftpb.Member{*ost.local}, membs...)
 	peers := make([]raft.Peer, len(membs))
@@ -171,14 +171,14 @@ type restart struct {
 	bootstrap bootstrapFunc
 }
 
-func (r restart) before(ost *operatorsState) error {
+func (r restart) before(ctx context.Context, ost *operatorsState) error {
 	if !ost.hasExistingState {
 		return errors.New("raft: node state not found")
 	}
 	return nil
 }
 
-func (r restart) after(ost *operatorsState) error {
+func (r restart) after(ctx context.Context, ost *operatorsState) error {
 	ost.eng.node = r.bootstrap(ost.eng.cfg, nil)
 	return nil
 }
@@ -192,7 +192,7 @@ type fallback struct {
 	success   Operator
 }
 
-func (f *fallback) before(ost *operatorsState) error {
+func (f *fallback) before(ctx context.Context, ost *operatorsState) error {
 	errs := []string{}
 	for _, op := range f.operators {
 		_, ok := op.(interface {
@@ -203,7 +203,7 @@ func (f *fallback) before(ost *operatorsState) error {
 		}
 
 		// call operator.
-		err := op.before(ost)
+		err := op.before(ctx, ost)
 		if err == nil {
 			f.success = op
 			return nil
@@ -215,12 +215,12 @@ func (f *fallback) before(ost *operatorsState) error {
 	return fmt.Errorf(strings.Join(errs, ", "))
 }
 
-func (f *fallback) after(ost *operatorsState) error {
+func (f *fallback) after(ctx context.Context, ost *operatorsState) error {
 	if f.success == nil {
 		panic("fallback.after called before fallback.before")
 	}
 
-	return f.success.after(ost)
+	return f.success.after(ctx, ost)
 }
 
 func (f fallback) String() string {
@@ -228,23 +228,23 @@ func (f fallback) String() string {
 }
 
 type stateSetup struct {
-	publishSnapshotFile func(*storage.Snapshot) error
+	publishSnapshotFile func(context.Context, *storage.Snapshot) error
 }
 
-func (s stateSetup) before(ost *operatorsState) (err error) { return }
-func (s stateSetup) after(ost *operatorsState) (err error) {
+func (s stateSetup) before(ctx context.Context, ost *operatorsState) (err error) { return }
+func (s stateSetup) after(ctx context.Context, ost *operatorsState) (err error) {
 	if !ost.hasExistingState {
 		return
 	}
 
 	if !raft.IsEmptySnap(ost.sf.Raw) {
-		if err := s.publishSnapshotFile(ost.sf); err != nil {
+		if err := s.publishSnapshotFile(ctx, ost.sf); err != nil {
 			return err
 		}
 	}
 
-	_ = ost.eng.cache.SetHardState(ost.hst)
-	_ = ost.eng.cache.Append(ost.ents)
+	// _ = ost.eng.storage.SetHardState(*ost.hst)
+	// _ = ost.eng.storage.Append(ost.ents)
 	return
 }
 
@@ -256,8 +256,9 @@ type setup struct {
 	addr string
 }
 
-func (s setup) before(ost *operatorsState) (err error) {
+func (s setup) before(ctx context.Context, ost *operatorsState) (err error) {
 	ost.hasExistingState = ost.eng.storage.Exist()
+	ost.hasExistingState = false
 	ost.local = &raftpb.Member{
 		// generate a random id in case this is the first member in the cluster.
 		ID:      uint64(rand.Int63()) + 1,
@@ -266,7 +267,7 @@ func (s setup) before(ost *operatorsState) (err error) {
 	return
 }
 
-func (s setup) after(ost *operatorsState) (err error) {
+func (s setup) after(ctx context.Context, ost *operatorsState) (err error) {
 	if len(ost.local.Address) == 0 {
 		return errors.New("raft: no address set, use raft.WithAddress() or raft.WithMembers()")
 	}
@@ -282,11 +283,11 @@ func (s setup) after(ost *operatorsState) (err error) {
 
 	// create memory storage at first place so the operators append hs/ents
 	// and to avoid using the same storage on different start invocations.
-	ost.eng.cache = raft.NewMemoryStorage()
+	// ost.eng.cache = raft.NewMemoryStorage()
 	cfg := ost.eng.cfg.RaftConfig()
 	cfg.ID = local.ID
 	cfg.Logger = nodeLogger{ost.eng.cfg.Logger()}
-	cfg.Storage = ost.eng.cache
+	cfg.Storage = ost.eng.storage
 	ost.cfg = cfg
 	ost.local = local
 
@@ -306,10 +307,10 @@ func (s setup) String() string {
 
 type forceNewCluster struct{}
 
-func (forceNewCluster) noFallback()                            {}
-func (forceNewCluster) before(ost *operatorsState) (err error) { return }
+func (forceNewCluster) noFallback()                                                 {}
+func (forceNewCluster) before(ctx context.Context, ost *operatorsState) (err error) { return }
 
-func (f forceNewCluster) after(ost *operatorsState) (err error) {
+func (f forceNewCluster) after(ctx context.Context, ost *operatorsState) (err error) {
 	storage := ost.eng.storage
 	sf := ost.sf
 	local := *ost.local
@@ -323,18 +324,18 @@ func (f forceNewCluster) after(ost *operatorsState) (err error) {
 		sf.Members = []raftpb.Member{local}
 		sf.Raw.Metadata.ConfState.Voters = []uint64{local.ID}
 
-		err := storage.Snapshotter().Write(sf)
-		if err != nil {
-			return err
-		}
-
-		meta := sf.Raw.Metadata
-		sf, err = storage.Snapshotter().Read(meta.Term, meta.Index)
-		if err != nil {
-			return err
-		}
-
-		ost.sf = sf
+		// err := storage.Snapshotter().Write(sf)
+		// if err != nil {
+		// 	return err
+		// }
+		//
+		// meta := sf.Raw.Metadata
+		// sf, err = storage.Snapshotter().Read(meta.Term, meta.Index)
+		// if err != nil {
+		// 	return err
+		// }
+		//
+		// ost.sf = sf
 	}
 
 	// discard uncommitted entries
@@ -399,7 +400,7 @@ func (f forceNewCluster) after(ost *operatorsState) (err error) {
 
 	ost.ents = ents
 	ost.hst = hs
-	return storage.SaveEntries(hs, ents)
+	return storage.SaveEntries(ctx, hs, ents)
 }
 
 func (f forceNewCluster) addOns() []Operator {
@@ -414,11 +415,11 @@ type restore struct {
 	path string
 }
 
-func (r restore) after(ost *operatorsState) (err error) { return }
+func (r restore) after(ctx context.Context, ost *operatorsState) (err error) { return }
 
 func (r restore) noFallback() {}
 
-func (r restore) before(ost *operatorsState) (err error) {
+func (r restore) before(ctx context.Context, ost *operatorsState) (err error) {
 	if ost.hasExistingState {
 		return errors.New("raft: found orphan node state")
 	}
@@ -428,10 +429,10 @@ func (r restore) before(ost *operatorsState) (err error) {
 	// update state to existed.
 	ost.hasExistingState = true
 
-	sf, err := storage.Snapshotter().ReadFrom(r.path)
-	if err != nil {
-		return err
-	}
+	// sf, err := storage.Snapshotter().ReadFrom(r.path)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// boot storage.
 	meta := pbutil.MustMarshal(ost.local)
@@ -465,14 +466,14 @@ func (r restore) before(ost *operatorsState) (err error) {
 	}
 
 	commit, term := uint64(len(ents)), uint64(1)
-	hs := etcdraftpb.HardState{
+	hs := &etcdraftpb.HardState{
 		Term:   term,
 		Vote:   membs[0].ID,
 		Commit: commit,
 	}
 
 	// save entries to storgae.
-	if err := storage.SaveEntries(hs, ents); err != nil {
+	if err := storage.SaveEntries(ctx, hs, ents); err != nil {
 		return err
 	}
 
@@ -480,7 +481,7 @@ func (r restore) before(ost *operatorsState) (err error) {
 		Voters: nodeIDs,
 	}
 
-	snap := etcdraftpb.Snapshot{
+	snap := &etcdraftpb.Snapshot{
 		Metadata: etcdraftpb.SnapshotMetadata{
 			Index:     commit,
 			Term:      term,
@@ -488,17 +489,17 @@ func (r restore) before(ost *operatorsState) (err error) {
 		},
 	}
 
-	// update snapshot file meta.
-	sf.Members = membs
-	sf.Raw = snap
-
-	// save new snapshot file to state dir.
-	if err := storage.Snapshotter().Write(sf); err != nil {
-		return err
-	}
+	// // update snapshot file meta.
+	// sf.Members = membs
+	// sf.Raw = *snap
+	//
+	// // save new snapshot file to state dir.
+	// if err := storage.Snapshotter().Write(sf); err != nil {
+	// 	return err
+	// }
 
 	// save snapshot to storage.
-	if err := storage.SaveSnapshot(snap); err != nil {
+	if err := storage.SaveSnapshot(ctx, snap); err != nil {
 		return err
 	}
 
@@ -518,11 +519,11 @@ type members struct {
 	membs []raftpb.Member
 }
 
-func (m members) after(ost *operatorsState) (err error) { return }
+func (m members) after(ctx context.Context, ost *operatorsState) (err error) { return }
 
 func (m members) noFallback() {}
 
-func (m members) before(ost *operatorsState) (err error) {
+func (m members) before(ctx context.Context, ost *operatorsState) (err error) {
 	if len(m.membs) >= 1 {
 		id := ost.local.ID
 		ost.local = &m.membs[0]
@@ -540,8 +541,8 @@ func (m members) String() string {
 
 type removedMembers struct{}
 
-func (rm removedMembers) before(ost *operatorsState) (err error) { return }
-func (rm removedMembers) after(ost *operatorsState) (err error) {
+func (rm removedMembers) before(ctx context.Context, ost *operatorsState) (err error) { return }
+func (rm removedMembers) after(ctx context.Context, ost *operatorsState) (err error) {
 	// removed members must be added back to the pool right away,
 	// to avoid to connect to them, and getting stuck on add conf change.
 	for _, ent := range ost.ents {
@@ -551,7 +552,7 @@ func (rm removedMembers) after(ost *operatorsState) (err error) {
 			if cc.Type == etcdraftpb.ConfChangeRemoveNode {
 				mem := new(raftpb.Member)
 				pbutil.MustUnmarshal(mem, cc.Context)
-				if err := ost.eng.pool.Add(*mem); err != nil {
+				if err := ost.eng.pool.Add(ctx, *mem); err != nil {
 					return err
 				}
 			}
@@ -564,7 +565,7 @@ func (rm removedMembers) String() string {
 	return "RemovedMembers"
 }
 
-func invoke(d *engine, oprs ...Operator) (*operatorsState, error) {
+func invoke(ctx context.Context, d *engine, oprs ...Operator) (*operatorsState, error) {
 	for _, opr := range oprs {
 		a, ok := opr.(interface {
 			addOns() []Operator
@@ -583,13 +584,13 @@ func invoke(d *engine, oprs ...Operator) (*operatorsState, error) {
 	ost.eng = d
 
 	for _, opr := range oprs {
-		if err := opr.before(ost); err != nil {
+		if err := opr.before(ctx, ost); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, opr := range oprs {
-		if err := opr.after(ost); err != nil {
+		if err := opr.after(ctx, ost); err != nil {
 			return nil, err
 		}
 	}

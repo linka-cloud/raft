@@ -11,8 +11,8 @@ import (
 	gomock "github.com/golang/mock/gomock"
 	raftengine "github.com/shaj13/raft/internal/raftengine"
 	raftpb "github.com/shaj13/raft/internal/raftpb"
-	raft "go.etcd.io/etcd/raft/v3"
-	raftpb0 "go.etcd.io/etcd/raft/v3/raftpb"
+	raft "go.etcd.io/raft/v3"
+	raftpb0 "go.etcd.io/raft/v3/raftpb"
 )
 
 // MockEngine is a mock of Engine interface.
@@ -51,6 +51,20 @@ func (m *MockEngine) CreateSnapshot() (raftpb0.Snapshot, error) {
 func (mr *MockEngineMockRecorder) CreateSnapshot() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSnapshot", reflect.TypeOf((*MockEngine)(nil).CreateSnapshot))
+}
+
+// ForgetLeader mocks base method.
+func (m *MockEngine) ForgetLeader(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ForgetLeader", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ForgetLeader indicates an expected call of ForgetLeader.
+func (mr *MockEngineMockRecorder) ForgetLeader(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForgetLeader", reflect.TypeOf((*MockEngine)(nil).ForgetLeader), ctx)
 }
 
 // LinearizableRead mocks base method.
@@ -160,9 +174,9 @@ func (mr *MockEngineMockRecorder) Shutdown(arg0 interface{}) *gomock.Call {
 }
 
 // Start mocks base method.
-func (m *MockEngine) Start(addr string, oprs ...raftengine.Operator) error {
+func (m *MockEngine) Start(ctx context.Context, addr string, oprs ...raftengine.Operator) error {
 	m.ctrl.T.Helper()
-	varargs := []interface{}{addr}
+	varargs := []interface{}{ctx, addr}
 	for _, a := range oprs {
 		varargs = append(varargs, a)
 	}
@@ -172,9 +186,9 @@ func (m *MockEngine) Start(addr string, oprs ...raftengine.Operator) error {
 }
 
 // Start indicates an expected call of Start.
-func (mr *MockEngineMockRecorder) Start(addr interface{}, oprs ...interface{}) *gomock.Call {
+func (mr *MockEngineMockRecorder) Start(ctx, addr interface{}, oprs ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]interface{}{addr}, oprs...)
+	varargs := append([]interface{}{ctx, addr}, oprs...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockEngine)(nil).Start), varargs...)
 }
 

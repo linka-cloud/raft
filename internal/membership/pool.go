@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/raftlog"
-	"golang.org/x/sync/errgroup"
 )
 
 func init() {
@@ -40,11 +41,11 @@ func (p *pool) RegisterTypeMatcher(fn func(m raftpb.Member) raftpb.MemberType) {
 	p.matcher = fn
 }
 
-func (p *pool) NextID() uint64 {
+func (p *pool) NextID(ctx context.Context) uint64 {
 	var id uint64
 	for {
 		id = uint64(rand.Int63()) + 1
-		if _, ok := p.Get(id); !ok {
+		if _, ok := p.Get(ctx, id); !ok {
 			break
 		}
 	}
@@ -61,23 +62,23 @@ func (p *pool) Members() []Member {
 	return membs
 }
 
-func (p *pool) Get(id uint64) (Member, bool) {
+func (p *pool) Get(_ context.Context, id uint64) (Member, bool) {
 	p.mu.Lock()
 	m, ok := p.membs[id]
 	p.mu.Unlock()
 	return m, ok
 }
 
-func (p *pool) Add(m raftpb.Member) error {
-	_, ok := p.Get(m.ID)
+func (p *pool) Add(ctx context.Context, m raftpb.Member) error {
+	_, ok := p.Get(ctx, m.ID)
 	if ok {
-		return p.Update(m)
+		return p.Update(ctx, m)
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	mem, err := p.newMember(m)
+	mem, err := p.newMember(ctx, m)
 	if err != nil {
 		return err
 	}
@@ -86,17 +87,17 @@ func (p *pool) Add(m raftpb.Member) error {
 	return nil
 }
 
-func (p *pool) Update(m raftpb.Member) error {
-	mem, ok := p.Get(m.ID)
+func (p *pool) Update(ctx context.Context, m raftpb.Member) error {
+	mem, ok := p.Get(ctx, m.ID)
 	if !ok {
-		return p.Add(m)
+		return p.Add(ctx, m)
 	}
 
 	return mem.Update(m)
 }
 
-func (p *pool) Remove(m raftpb.Member) error {
-	mem, ok := p.Get(m.ID)
+func (p *pool) Remove(ctx context.Context, m raftpb.Member) error {
+	mem, ok := p.Get(ctx, m.ID)
 	if !ok {
 		return fmt.Errorf("raft/membership: member %x not found", m.ID)
 	}
@@ -112,7 +113,7 @@ func (p *pool) Remove(m raftpb.Member) error {
 		p.logger.Warningf("raft.membership: closing member %x: %v", m.ID, err)
 	}
 
-	mem, err := p.newMember(m)
+	mem, err := p.newMember(ctx, m)
 	if err != nil {
 		return err
 	}
@@ -121,7 +122,7 @@ func (p *pool) Remove(m raftpb.Member) error {
 	return nil
 }
 
-func (p *pool) Snapshot() []raftpb.Member {
+func (p *pool) Snapshot(_ context.Context) []raftpb.Member {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	membs := []raftpb.Member{}
@@ -131,9 +132,9 @@ func (p *pool) Snapshot() []raftpb.Member {
 	return membs
 }
 
-func (p *pool) Restore(membs []raftpb.Member) {
+func (p *pool) Restore(ctx context.Context, membs []raftpb.Member) {
 	for _, m := range membs {
-		if err := p.Add(m); err != nil {
+		if err := p.Add(ctx, m); err != nil {
 			p.logger.Errorf("raft.membership: adding member %x: %v", m.ID, err)
 		}
 	}
@@ -157,10 +158,10 @@ func (p *pool) TearDown(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (p *pool) newMember(m raftpb.Member) (Member, error) {
+func (p *pool) newMember(ctx context.Context, m raftpb.Member) (Member, error) {
 	switch p.matcher(m) {
 	case raftpb.VoterMember, raftpb.LearnerMember, raftpb.StagingMember:
-		return newRemote(p.cfg, m)
+		return newRemote(ctx, p.cfg, m)
 	case raftpb.RemovedMember:
 		return newRemoved(p.cfg, m)
 	case raftpb.LocalMember:

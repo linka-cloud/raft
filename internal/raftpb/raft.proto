@@ -3,7 +3,7 @@ syntax = "proto3";
 package raftpb;
 
 import "gogoproto/gogo.proto";
-import "go.etcd.io/etcd/raft/v3/raftpb/raft.proto";
+import "go.etcd.io/raft/v3/raftpb/raft.proto";
 
 option (gogoproto.marshaler_all) = true;
 option (gogoproto.sizer_all) = true;
@@ -19,12 +19,12 @@ message Member {
 	// Type used to distinguish members (local, remote, etc).
 	MemberType type = 3;
 	// Context is treated as an opaque payload and can be used to
-	// attach an extra info/data on member. 
+	// attach an extra info/data on member.
 	bytes  context  = 4;
 }
 
 message Replicate {
-	// CID specifies the transaction change id. 
+	// CID specifies the transaction change id.
 	uint64 cid = 1 [(gogoproto.customname) = "CID" ];
 	// Data specifies the raw replicate data.
 	bytes  data  = 2;

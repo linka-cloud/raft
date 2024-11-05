@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	raft "github.com/shaj13/raft"
 	"github.com/stretchr/testify/require"
+
+	raft "github.com/shaj13/raft"
 )
 
 func TestUpdateMember(t *testing.T) {
@@ -26,7 +27,7 @@ func TestUpdateMember(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, n := range nodes {
-		mem, ok := n.raftnode.GetMemebr(raw.ID)
+		mem, ok := n.raftnode.GetMember(raw.ID)
 		require.True(t, ok)
 		require.Equal(t, info, mem.Raw().Context)
 	}
@@ -54,7 +55,7 @@ func TestRemoveMember(t *testing.T) {
 
 		// wait until mem removed.
 		for i := 0; i <= 5; i++ {
-			mem, _ := leader.raftnode.GetMemebr(id)
+			mem, _ := leader.raftnode.GetMember(id)
 			if mem.Type() == raft.RemovedMember {
 				break
 			}
@@ -227,7 +228,7 @@ func TestStagingMember(t *testing.T) {
 
 	promoted := false
 	for i := 1; i < 5; i++ {
-		mem, _ := nodes[0].raftnode.GetMemebr(raw.ID)
+		mem, _ := nodes[0].raftnode.GetMember(raw.ID)
 		if mem.Type() == raft.VoterMember {
 			promoted = true
 			break

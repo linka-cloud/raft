@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	raft "github.com/shaj13/raft"
 	"github.com/shaj13/raft/internal/raftpb"
@@ -322,7 +322,7 @@ func (o *orchestrator) follower() *node {
 		}
 
 		fid := n.raftnode.Whoami()
-		mem, _ := n.raftnode.GetMemebr(fid)
+		mem, _ := n.raftnode.GetMember(fid)
 		if fid != id && mem.Type() == raft.VoterMember {
 			return n
 		}

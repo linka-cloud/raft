@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	raft "github.com/shaj13/raft"
 	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSnapshotShare(t *testing.T) {
@@ -104,7 +105,7 @@ func testRestore(t *testing.T, cb func(), opt raft.StartOption, interval uint64,
 	require.NoError(t, err)
 
 	for i := 0; i < 5; i++ {
-		mem, _ := leader.raftnode.GetMemebr(followerID)
+		mem, _ := leader.raftnode.GetMember(followerID)
 		if !mem.IsActive() {
 			break
 		}

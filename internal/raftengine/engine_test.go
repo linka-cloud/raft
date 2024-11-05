@@ -8,6 +8,13 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/pkg/v3/idutil"
+	"go.etcd.io/etcd/pkg/v3/pbutil"
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+	"go.etcd.io/raft/v3/tracker"
+
 	"github.com/shaj13/raft/internal/atomic"
 	"github.com/shaj13/raft/internal/membership"
 	membershipmock "github.com/shaj13/raft/internal/mocks/membership"
@@ -16,12 +23,6 @@ import (
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/raftlog"
-	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/pkg/v3/idutil"
-	"go.etcd.io/etcd/pkg/v3/pbutil"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
-	"go.etcd.io/etcd/raft/v3/tracker"
 )
 
 func TestNew(t *testing.T) {
@@ -38,6 +39,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestStart(t *testing.T) {
+	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	cfg := NewMockConfig(ctrl)
 	stg := storagemock.NewMockStorage(ctrl)
@@ -52,7 +54,7 @@ func TestStart(t *testing.T) {
 		pool:         pool,
 		cfg:          cfg,
 		msgbus:       msgbus.New(),
-		cache:        raft.NewMemoryStorage(),
+		storage:      raft.NewMemoryStorage(),
 		started:      atomic.NewBool(),
 		snapIndex:    atomic.NewUint64(),
 		appliedIndex: atomic.NewUint64(),
@@ -63,7 +65,6 @@ func TestStart(t *testing.T) {
 
 	defer eng.Shutdown(ctx)
 
-	cfg.EXPECT().Context().Return(ctx).MaxTimes(2)
 	cfg.EXPECT().Logger().Return(raftlog.DefaultLogger).MaxTimes(2)
 	cfg.EXPECT().RaftConfig().Return(&raft.Config{}).MaxTimes(2)
 	cfg.EXPECT().TickInterval().Return(time.Second).MaxTimes(2)
@@ -78,12 +79,12 @@ func TestStart(t *testing.T) {
 	node.EXPECT().Status().Return(raft.Status{}).MaxTimes(2)
 
 	eng.node = nil
-	err := eng.Start(":80")
+	err := eng.Start(ctx, ":80")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "node not initialized")
 
 	eng.node = node
-	err = eng.Start(":80")
+	err = eng.Start(ctx, ":80")
 	require.Equal(t, ErrStopped, err)
 }
 
@@ -421,6 +422,7 @@ func TestLinearizableRead(t *testing.T) {
 }
 
 func TestLocalCreateSnapshot(t *testing.T) {
+	ctx := context.Background()
 	expectedErr := errors.New("TestCreateSnapshot")
 	ctrl := gomock.NewController(t)
 	cfg := NewMockConfig(ctrl)
@@ -431,13 +433,13 @@ func TestLocalCreateSnapshot(t *testing.T) {
 		started:      atomic.NewBool(),
 		appliedIndex: atomic.NewUint64(),
 		snapIndex:    atomic.NewUint64(),
-		cache:        raft.NewMemoryStorage(),
+		storage:      raft.NewMemoryStorage(),
 	}
 
 	eng.started.Set()
 
 	// round #1 it refuse to create snap when indices are equaled.
-	err := eng.createSnapshot()
+	err := eng.createSnapshot(ctx)
 	require.NoError(t, err)
 
 	// round #2 it return err when fsm return err.
@@ -445,7 +447,7 @@ func TestLocalCreateSnapshot(t *testing.T) {
 	fsm.EXPECT().Snapshot().Return(nil, expectedErr)
 	eng.fsm = fsm
 	eng.appliedIndex.Set(1)
-	err = eng.createSnapshot()
+	err = eng.createSnapshot(ctx)
 	require.Equal(t, expectedErr, err)
 
 	// round #3 it return nil and create snap.
@@ -453,16 +455,16 @@ func TestLocalCreateSnapshot(t *testing.T) {
 	stg := storagemock.NewMockStorage(ctrl)
 	shotter := storagemock.NewMockSnapshotter(ctrl)
 	stg.EXPECT().Snapshotter().Return(shotter)
-	stg.EXPECT().SaveSnapshot(gomock.Any()).Return(nil)
+	stg.EXPECT().SaveSnapshot(ctx, gomock.Any()).Return(nil)
 	shotter.EXPECT().Write(gomock.Any()).Return(nil)
-	pool.EXPECT().Snapshot().Return(nil)
+	pool.EXPECT().Snapshot(ctx).Return(nil)
 	fsm = NewMockStateMachine(ctrl)
 	fsm.EXPECT().Snapshot().Return(nil, nil)
 	eng.fsm = fsm
 	eng.storage = stg
 	eng.pool = pool
-	eng.cache.Append([]etcdraftpb.Entry{{Index: 1}})
-	err = eng.createSnapshot()
+	eng.storage.Append([]etcdraftpb.Entry{{Index: 1}})
+	err = eng.createSnapshot(ctx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), eng.snapIndex.Get())
 }
@@ -489,7 +491,7 @@ func TestEventLoop(t *testing.T) {
 	node.EXPECT().Advance()
 	node.EXPECT().Status()
 	node.EXPECT().Ready().Return(readyc).AnyTimes()
-	stg.EXPECT().SaveEntries(gomock.Any(), gomock.Any()).Return(nil).MinTimes(1)
+	stg.EXPECT().SaveEntries(ctx, gomock.Any(), gomock.Any()).Return(nil).MinTimes(1)
 	eng := &engine{
 		appliedIndex: atomic.NewUint64(),
 		snapIndex:    atomic.NewUint64(),
@@ -499,7 +501,7 @@ func TestEventLoop(t *testing.T) {
 		cfg:          cfg,
 	}
 
-	err := eng.eventLoop()
+	err := eng.eventLoop(ctx)
 	require.Equal(t, ErrStopped, err)
 }
 
@@ -517,7 +519,7 @@ func TestPublishReadState(t *testing.T) {
 	eng := &engine{
 		msgbus: bus,
 	}
-	eng.publishReadState([]raft.ReadState{rs})
+	eng.publishReadState(context.Background(), []raft.ReadState{rs})
 	got := <-sub.Chan()
 	require.Equal(t, index, got)
 }
@@ -531,7 +533,7 @@ func TestPublishAppliedIndices(t *testing.T) {
 	s1 := bus.SubscribeOnce(2)
 	s2 := bus.SubscribeOnce(3)
 
-	eng.publishAppliedIndices(1, 3)
+	eng.publishAppliedIndices(context.Background(), 1, 3)
 
 	v1 := <-s1.Chan()
 	v2 := <-s2.Chan()
@@ -541,6 +543,7 @@ func TestPublishAppliedIndices(t *testing.T) {
 }
 
 func TestPublishSnapshot(t *testing.T) {
+	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	stg := storagemock.NewMockStorage(ctrl)
 	shotter := storagemock.NewMockSnapshotter(ctrl)
@@ -559,15 +562,15 @@ func TestPublishSnapshot(t *testing.T) {
 		},
 	}
 
-	stg.EXPECT().SaveSnapshot(gomock.Any()).Return(nil)
+	stg.EXPECT().SaveSnapshot(ctx, gomock.Any()).Return(nil)
 	stg.EXPECT().Snapshotter().Return(shotter)
 	shotter.EXPECT().Read(gomock.Any(), gomock.Any()).Return(sf, nil)
-	pool.EXPECT().Restore(gomock.Any())
+	pool.EXPECT().Restore(ctx, gomock.Any())
 	fsm.EXPECT().Restore(gomock.Any()).Return(nil)
 
 	eng := &engine{
 		logger:       raftlog.DefaultLogger,
-		cache:        raft.NewMemoryStorage(),
+		storage:      raft.NewMemoryStorage(),
 		storage:      stg,
 		appliedIndex: atomic.NewUint64(),
 		snapIndex:    atomic.NewUint64(),
@@ -577,14 +580,14 @@ func TestPublishSnapshot(t *testing.T) {
 	eng.appliedIndex.Set(1)
 
 	// round #1 it return's err if snap index is lower than applied index.
-	err := eng.publishSnapshot(*snap)
+	err := eng.publishSnapshot(ctx, snap)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), " should > progress.appliedIndex")
 
 	// round #2 it publish snapshot.
 	snap.Metadata.Index = 3
 	sf.Raw = *snap
-	err = eng.publishSnapshot(*snap)
+	err = eng.publishSnapshot(ctx, snap)
 	require.NoError(t, err)
 	require.Equal(t, snap.Metadata.Index, eng.snapIndex.Get())
 	require.Equal(t, snap.Metadata.Index, eng.appliedIndex.Get())
@@ -609,12 +612,13 @@ func TestPublishReplicate(t *testing.T) {
 		Data: pbutil.MustMarshal(rp),
 	}
 	fsm.EXPECT().Apply(gomock.Eq(data))
-	eng.publishReplicate(ent)
+	eng.publishReplicate(context.Background(), ent)
 	v := <-sub.Chan()
 	require.Nil(t, v)
 }
 
 func TestPublishConfChange(t *testing.T) {
+	ctx := context.Background()
 	closedc := make(chan struct{})
 	close(closedc)
 
@@ -627,7 +631,7 @@ func TestPublishConfChange(t *testing.T) {
 			change: etcdraftpb.ConfChangeAddNode,
 			expect: func(ctrl *gomock.Controller, d *engine) <-chan struct{} {
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Add(gomock.Any()).MinTimes(1).Return(ErrStopped)
+				pool.EXPECT().Add(ctx, gomock.Any()).MinTimes(1).Return(ErrStopped)
 				d.pool = pool
 				return closedc
 			},
@@ -637,7 +641,7 @@ func TestPublishConfChange(t *testing.T) {
 			change: etcdraftpb.ConfChangeUpdateNode,
 			expect: func(ctrl *gomock.Controller, d *engine) <-chan struct{} {
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Update(gomock.Any()).MinTimes(1)
+				pool.EXPECT().Update(ctx, gomock.Any()).MinTimes(1)
 				d.pool = pool
 				return closedc
 			},
@@ -648,7 +652,7 @@ func TestPublishConfChange(t *testing.T) {
 				c := make(chan struct{})
 				pool := membershipmock.NewMockPool(ctrl)
 				cfg := NewMockConfig(ctrl)
-				pool.EXPECT().Remove(gomock.Any()).DoAndReturn(func(raftpb.Member) error {
+				pool.EXPECT().Remove(ctx, gomock.Any()).DoAndReturn(func(raftpb.Member) error {
 					c <- struct{}{}
 					return ErrStopped
 				}).MinTimes(1)
@@ -685,7 +689,7 @@ func TestPublishConfChange(t *testing.T) {
 
 		node.EXPECT().ApplyConfChange(gomock.Eq(cc))
 		wait := tt.expect(ctrl, eng)
-		eng.publishConfChange(ent)
+		eng.publishConfChange(context.Background(), ent)
 		v := <-sub.Chan()
 		require.Equal(t, tt.err, v)
 		<-wait
@@ -694,6 +698,7 @@ func TestPublishConfChange(t *testing.T) {
 }
 
 func TestProcess(t *testing.T) {
+	ctx := context.Background()
 	c := make(chan etcdraftpb.Message)
 	ctrl := gomock.NewController(t)
 	node := NewMockNode(ctrl)
@@ -704,7 +709,7 @@ func TestProcess(t *testing.T) {
 
 	node.EXPECT().Step(gomock.Any(), gomock.Any()).Return(ErrStopped).MinTimes(1)
 
-	eng.process(c)
+	eng.process(ctx, c)
 
 	c <- etcdraftpb.Message{}
 	eng.cancel()
@@ -716,16 +721,17 @@ func TestProcess(t *testing.T) {
 }
 
 func TestSend(t *testing.T) {
+	ctx := context.Background()
 	table := []func(*gomock.Controller, *engine, uint64){
 		func(ctrl *gomock.Controller, eng *engine, id uint64) {
 			pool := membershipmock.NewMockPool(ctrl)
-			pool.EXPECT().Get(gomock.Eq(id)).Return(nil, false)
+			pool.EXPECT().Get(ctx, gomock.Eq(id)).Return(nil, false)
 			eng.pool = pool
 		},
 		func(ctrl *gomock.Controller, eng *engine, id uint64) {
 			mem := membershipmock.NewMockMember(ctrl)
 			pool := membershipmock.NewMockPool(ctrl)
-			pool.EXPECT().Get(gomock.Eq(id)).Return(mem, true)
+			pool.EXPECT().Get(ctx, gomock.Eq(id)).Return(mem, true)
 			mem.EXPECT().Send(gomock.Any()).Return(ErrStopped)
 			eng.pool = pool
 		},
@@ -737,7 +743,7 @@ func TestSend(t *testing.T) {
 		eng := new(engine)
 		eng.logger = raftlog.DefaultLogger
 		tt(ctrl, eng, msg.To)
-		eng.send([]etcdraftpb.Message{msg})
+		eng.send(ctx, []etcdraftpb.Message{msg})
 		ctrl.Finish()
 	}
 }
@@ -782,14 +788,14 @@ func TestPromotions(t *testing.T) {
 		Return(ErrStopped)
 
 	eng.started.Set()
-	eng.promotions()
+	eng.promotions(context.Background())
 	ctrl.Finish()
 }
 
 func TestCreateSnapshot(t *testing.T) {
 	eng := &engine{
 		logger:       raftlog.DefaultLogger,
-		cache:        raft.NewMemoryStorage(),
+		storage:      raft.NewMemoryStorage(),
 		started:      atomic.NewBool(),
 		snapIndex:    atomic.NewUint64(),
 		appliedIndex: atomic.NewUint64(),
@@ -814,6 +820,7 @@ func TestCreateSnapshot(t *testing.T) {
 }
 
 func TestForceSnapshot(t *testing.T) {
+	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	node := NewMockNode(ctrl)
 	fsm := NewMockStateMachine(ctrl)
@@ -828,14 +835,14 @@ func TestForceSnapshot(t *testing.T) {
 	}
 
 	// round #1 it should return false when msg not snapshot.
-	ok := eng.forceSnapshot(etcdraftpb.Message{})
+	ok := eng.forceSnapshot(ctx, etcdraftpb.Message{})
 	require.False(t, ok)
 
 	msg := &etcdraftpb.Message{
 		From: 1,
 		To:   2,
 		Type: etcdraftpb.MsgSnap,
-		Snapshot: etcdraftpb.Snapshot{
+		Snapshot: &etcdraftpb.Snapshot{
 			Metadata: etcdraftpb.SnapshotMetadata{
 				ConfState: etcdraftpb.ConfState{
 					Voters: []uint64{1, 2},
@@ -845,7 +852,7 @@ func TestForceSnapshot(t *testing.T) {
 	}
 
 	// round #2 it should return false when to exist in voters list.
-	ok = eng.forceSnapshot(*msg)
+	ok = eng.forceSnapshot(ctx, *msg)
 	require.False(t, ok)
 
 	// round #3 it should create snapshot and report snap as failed.
@@ -854,7 +861,7 @@ func TestForceSnapshot(t *testing.T) {
 	eng.appliedIndex.Set(1)
 	node.EXPECT().ReportSnapshot(gomock.Eq(msg.To), gomock.Eq(raft.SnapshotFailure))
 	fsm.EXPECT().Snapshot().Return(nil, ErrNoLeader)
-	ok = eng.forceSnapshot(*msg)
+	ok = eng.forceSnapshot(ctx, *msg)
 	require.True(t, ok)
 	ctrl.Finish()
 }

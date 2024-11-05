@@ -4,16 +4,19 @@ import (
 	"io"
 	"net/http"
 
+	"google.golang.org/grpc"
+
 	"github.com/shaj13/raft"
 	"github.com/shaj13/raft/transport"
 	"github.com/shaj13/raft/transport/raftgrpc"
 	"github.com/shaj13/raft/transport/rafthttp"
-	"google.golang.org/grpc"
 )
 
 type stateMachine struct{}
 
-func (stateMachine) Apply([]byte)                           {}
+func (stateMachine) Apply([]byte) error {
+	return nil
+}
 func (stateMachine) Snapshot() (r io.ReadCloser, err error) { return }
 func (stateMachine) Restore(io.ReadCloser) (err error)      { return }
 

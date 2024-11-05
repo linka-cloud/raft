@@ -13,7 +13,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	transportmock "github.com/shaj13/raft/internal/mocks/transport"
 	"github.com/shaj13/raft/internal/raftpb"

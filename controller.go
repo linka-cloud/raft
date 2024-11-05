@@ -2,16 +2,18 @@ package raft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
+
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftengine"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/internal/transport"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 type controller struct {
@@ -24,7 +26,7 @@ type controller struct {
 func (c *controller) Join(ctx context.Context, gid uint64, m *raftpb.Member) (*raftpb.JoinResponse, error) {
 	var err error
 
-	if _, ok := c.node.GetMemebr(m.ID); !ok {
+	if _, ok := c.node.GetMember(ctx, m.ID); !ok {
 		err = c.node.AddMember(ctx, m)
 	} else {
 		err = c.node.UpdateMember(ctx, m)
@@ -36,7 +38,7 @@ func (c *controller) Join(ctx context.Context, gid uint64, m *raftpb.Member) (*r
 
 	resp := &raftpb.JoinResponse{
 		ID:      m.ID,
-		Members: c.pool.Snapshot(),
+		Members: c.pool.Snapshot(ctx),
 	}
 
 	return resp, nil
@@ -51,11 +53,13 @@ func (c *controller) PromoteMember(ctx context.Context, gid uint64, m raftpb.Mem
 }
 
 func (c *controller) SnapshotWriter(gid, term, index uint64) (io.WriteCloser, error) {
-	return c.storage.Snapshotter().Writer(term, index)
+	return nil, errors.New("unimplemented")
+	// return c.storage.Snapshotter().Writer(term, index)
 }
 
 func (c *controller) SnapshotReader(gid, term uint64, index uint64) (io.ReadCloser, error) {
-	return c.storage.Snapshotter().Reader(term, index)
+	return nil, errors.New("unimplemented")
+	// return c.storage.Snapshotter().Reader(term, index)
 }
 
 type router struct {

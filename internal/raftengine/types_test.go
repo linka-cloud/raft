@@ -15,7 +15,7 @@ import (
 	storage "github.com/shaj13/raft/internal/storage"
 	transport "github.com/shaj13/raft/internal/transport"
 	raftlog "github.com/shaj13/raft/raftlog"
-	v3 "go.etcd.io/etcd/raft/v3"
+	v3 "go.etcd.io/raft/v3"
 )
 
 // MockOperator is a mock of Operator interface.
@@ -56,31 +56,31 @@ func (mr *MockOperatorMockRecorder) String() *gomock.Call {
 }
 
 // after mocks base method.
-func (m *MockOperator) after(ost *operatorsState) error {
+func (m *MockOperator) after(ctx context.Context, ost *operatorsState) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "after", ost)
+	ret := m.ctrl.Call(m, "after", ctx, ost)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // after indicates an expected call of after.
-func (mr *MockOperatorMockRecorder) after(ost interface{}) *gomock.Call {
+func (mr *MockOperatorMockRecorder) after(ctx, ost interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "after", reflect.TypeOf((*MockOperator)(nil).after), ost)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "after", reflect.TypeOf((*MockOperator)(nil).after), ctx, ost)
 }
 
 // before mocks base method.
-func (m *MockOperator) before(ost *operatorsState) error {
+func (m *MockOperator) before(ctx context.Context, ost *operatorsState) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "before", ost)
+	ret := m.ctrl.Call(m, "before", ctx, ost)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // before indicates an expected call of before.
-func (mr *MockOperatorMockRecorder) before(ost interface{}) *gomock.Call {
+func (mr *MockOperatorMockRecorder) before(ctx, ost interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "before", reflect.TypeOf((*MockOperator)(nil).before), ost)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "before", reflect.TypeOf((*MockOperator)(nil).before), ctx, ost)
 }
 
 // MockConfig is a mock of Config interface.
@@ -104,20 +104,6 @@ func NewMockConfig(ctrl *gomock.Controller) *MockConfig {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockConfig) EXPECT() *MockConfigMockRecorder {
 	return m.recorder
-}
-
-// Context mocks base method.
-func (m *MockConfig) Context() context.Context {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Context")
-	ret0, _ := ret[0].(context.Context)
-	return ret0
-}
-
-// Context indicates an expected call of Context.
-func (mr *MockConfigMockRecorder) Context() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Context", reflect.TypeOf((*MockConfig)(nil).Context))
 }
 
 // Dial mocks base method.
@@ -168,10 +154,6 @@ func (m *MockConfig) Logger() raftlog.Logger {
 	ret := m.ctrl.Call(m, "Logger")
 	ret0, _ := ret[0].(raftlog.Logger)
 	return ret0
-}
-
-func (m *MockConfig) StateChangeCh() chan v3.StateType {
-	return nil
 }
 
 // Logger indicates an expected call of Logger.
@@ -234,6 +216,20 @@ func (m *MockConfig) SnapInterval() uint64 {
 func (mr *MockConfigMockRecorder) SnapInterval() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SnapInterval", reflect.TypeOf((*MockConfig)(nil).SnapInterval))
+}
+
+// StateChangeCh mocks base method.
+func (m *MockConfig) StateChangeCh() chan v3.StateType {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateChangeCh")
+	ret0, _ := ret[0].(chan v3.StateType)
+	return ret0
+}
+
+// StateChangeCh indicates an expected call of StateChangeCh.
+func (mr *MockConfigMockRecorder) StateChangeCh() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateChangeCh", reflect.TypeOf((*MockConfig)(nil).StateChangeCh))
 }
 
 // StateMachine mocks base method.
@@ -302,9 +298,11 @@ func (m *MockStateMachine) EXPECT() *MockStateMachineMockRecorder {
 }
 
 // Apply mocks base method.
-func (m *MockStateMachine) Apply(arg0 []byte) {
+func (m *MockStateMachine) Apply(arg0 []byte) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Apply", arg0)
+	ret := m.ctrl.Call(m, "Apply", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // Apply indicates an expected call of Apply.

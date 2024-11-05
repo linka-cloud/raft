@@ -4,12 +4,11 @@ import (
 	"context"
 	"io"
 
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/raftlog"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
-
-//go:generate mockgen -package transportmock  -source internal/transport/types.go -destination internal/mocks/transport/transport.go
 
 // Config define common configuration used by the dial and transport handler.
 type Config interface {

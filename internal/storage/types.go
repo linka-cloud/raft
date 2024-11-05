@@ -1,13 +1,14 @@
 package storage
 
 import (
+	"context"
 	"io"
 
-	"github.com/shaj13/raft/internal/raftpb"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
-)
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
-//go:generate mockgen -package storagemock -source internal/storage/types.go -destination internal/mocks/storage/storage.go
+	"github.com/shaj13/raft/internal/raftpb"
+)
 
 // Snapshot is the state of a system at a particular point in time.
 type Snapshot struct {
@@ -27,10 +28,15 @@ type Snapshotter interface {
 // Storage define a set of functions to persist raft data,
 // To provide durability and ensure data integrity.
 type Storage interface {
-	SaveSnapshot(etcdraftpb.Snapshot) error
-	SaveEntries(etcdraftpb.HardState, []etcdraftpb.Entry) error
+	raft.Storage
+	CreateSnapshot(ctx context.Context, i uint64, cs *etcdraftpb.ConfState, data []byte) (etcdraftpb.Snapshot, error)
+	ApplySnapshot(snap etcdraftpb.Snapshot) error
+	Compact(compactIndex uint64) error
+
+	SaveSnapshot(context.Context, *etcdraftpb.Snapshot) error
+	SaveEntries(context.Context, *etcdraftpb.HardState, []etcdraftpb.Entry) error
 	Snapshotter() Snapshotter
-	Boot([]byte) ([]byte, etcdraftpb.HardState, []etcdraftpb.Entry, *Snapshot, error)
+	Boot([]byte) ([]byte, *etcdraftpb.HardState, []etcdraftpb.Entry, *Snapshot, error)
 	Exist() bool
 	Close() error
 }

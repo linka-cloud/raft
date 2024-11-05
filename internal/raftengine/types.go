@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftpb"
@@ -16,13 +16,11 @@ import (
 	"github.com/shaj13/raft/raftlog"
 )
 
-//go:generate mockgen -package raftengine  -source internal/raftengine/types.go -destination internal/raftengine/types_test.go
-
 // Operator is a bootstrapper func that determine the action that is to be performed or considered.
 type Operator interface {
 	fmt.Stringer
-	before(ost *operatorsState) error
-	after(ost *operatorsState) error
+	before(ctx context.Context, ost *operatorsState) error
+	after(ctx context.Context, ost *operatorsState) error
 }
 
 // Config define common configuration used by the daemon.
@@ -31,11 +29,11 @@ type Config interface {
 	RaftConfig() *raft.Config
 	SnapInterval() uint64
 	Pool() membership.Pool
+	// Storage() *raftwal.DiskStorage
 	Storage() storage.Storage
 	Dial() transport.Dial
 	TickInterval() time.Duration
 	StateMachine() StateMachine
-	Context() context.Context
 	StateChangeCh() chan raft.StateType
 	DrainTimeout() time.Duration
 	GroupID() uint64
@@ -70,7 +68,7 @@ type operatorsState struct {
 	local            *raftpb.Member
 	membs            []raftpb.Member
 	cfg              *raft.Config
-	hst              etcdraftpb.HardState
+	hst              *etcdraftpb.HardState
 	ents             []etcdraftpb.Entry
 	sf               *storage.Snapshot
 	eng              *engine

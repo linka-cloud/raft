@@ -6,20 +6,23 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"go.etcd.io/raft/v3"
+
 	membershipmock "github.com/shaj13/raft/internal/mocks/membership"
 	storagemock "github.com/shaj13/raft/internal/mocks/storage"
 	transportmock "github.com/shaj13/raft/internal/mocks/transport"
 
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/pkg/v3/pbutil"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/internal/transport"
-	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/pkg/v3/pbutil"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 func TestInvoke(t *testing.T) {
+	ctx := context.Background()
 	temp := make(map[string]int, len(order))
 	for k, v := range order {
 		temp[k] = v
@@ -37,8 +40,8 @@ func TestInvoke(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		opr := NewMockOperator(ctrl)
 		opr.EXPECT().String().Return(fmt.Sprintf("%d", i)).AnyTimes()
-		before[i] = opr.EXPECT().before(gomock.Any()).Return(nil)
-		after[i] = opr.EXPECT().after(gomock.Any()).Return(nil)
+		before[i] = opr.EXPECT().before(ctx, gomock.Any()).Return(nil)
+		after[i] = opr.EXPECT().after(ctx, gomock.Any()).Return(nil)
 		// append to index 1.
 		oprs = append([]Operator{opr}, oprs...)
 		// add it to order.
@@ -49,77 +52,80 @@ func TestInvoke(t *testing.T) {
 	gomock.InOrder(after...)
 
 	// it invoke operator by order.
-	_, err := invoke(nil, oprs...)
+	_, err := invoke(ctx, nil, oprs...)
 	require.NoError(t, err)
 
 	// it return error when operator.before return err.
 	opr := NewMockOperator(ctrl)
-	opr.EXPECT().before(gomock.Any()).Return(ErrStopped)
-	_, err = invoke(nil, opr)
+	opr.EXPECT().before(ctx, gomock.Any()).Return(ErrStopped)
+	_, err = invoke(ctx, nil, opr)
 	require.Equal(t, ErrStopped, err)
 
 	// it return error when operator.after return err.
 	opr = NewMockOperator(ctrl)
-	opr.EXPECT().before(gomock.Any()).Return(nil)
-	opr.EXPECT().after(gomock.Any()).Return(ErrStopped)
-	_, err = invoke(nil, opr)
+	opr.EXPECT().before(ctx, gomock.Any()).Return(nil)
+	opr.EXPECT().after(ctx, gomock.Any()).Return(ErrStopped)
+	_, err = invoke(ctx, nil, opr)
 	require.Equal(t, ErrStopped, err)
 }
 
 func TestMembers(t *testing.T) {
+	ctx := context.Background()
 	raw := new(raftpb.Member)
 	ost := new(operatorsState)
 	ost.local = raw
 
 	// it should not set local or membs.
-	err := Members().before(ost)
+	err := Members().before(ctx, ost)
 	require.NoError(t, err)
 	require.Equal(t, raw, ost.local)
 	require.Equal(t, 0, len(ost.membs))
 
 	// it should not set local or membs.
-	err = Members(raftpb.Member{ID: 1}).before(ost)
+	err = Members(raftpb.Member{ID: 1}).before(ctx, ost)
 	require.NoError(t, err)
 	require.NotNil(t, ost.local)
 	require.Equal(t, uint64(1), ost.local.ID)
 	require.Equal(t, 0, len(ost.membs))
 
 	// it should set local and membs.
-	err = Members(raftpb.Member{ID: 1}, raftpb.Member{ID: 2}).before(ost)
+	err = Members(raftpb.Member{ID: 1}, raftpb.Member{ID: 2}).before(ctx, ost)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), ost.local.ID)
 	require.Equal(t, 1, len(ost.membs))
 	require.Equal(t, uint64(2), ost.membs[0].ID)
 
-	err = Members().after(ost)
+	err = Members().after(ctx, ost)
 	require.NoError(t, err)
 }
 
 func TestJoin(t *testing.T) {
+	ctx := context.Background()
 	ost := new(operatorsState)
 	ost.hasExistingState = true
 
-	err := Join("", 0).before(ost)
+	err := Join("", 0).before(ctx, ost)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already part")
 }
 
 func TestInitCluster(t *testing.T) {
+	ctx := context.Background()
 	nodeStarted := false
 	ost := new(operatorsState)
 	ost.local = new(raftpb.Member)
 	ost.eng = new(engine)
 	ost.hasExistingState = true
 
-	err := InitCluster().before(ost)
+	err := InitCluster().before(ctx, ost)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already exist")
 
 	var peers []raft.Peer
 	boot := mockBootstrap(&nodeStarted, &peers)
 	initc := initCluster{bootstrap: boot}
-	_ = Members(raftpb.Member{ID: 1}, raftpb.Member{ID: 2}).before(ost)
-	err = initc.after(ost)
+	_ = Members(raftpb.Member{ID: 1}, raftpb.Member{ID: 2}).before(ctx, ost)
+	err = initc.after(ctx, ost)
 	require.NoError(t, err)
 	require.True(t, nodeStarted)
 	require.Equal(t, 2, len(peers))
@@ -128,50 +134,53 @@ func TestInitCluster(t *testing.T) {
 }
 
 func TestRestart(t *testing.T) {
+	ctx := context.Background()
 	nodeRestarted := false
 	ost := new(operatorsState)
 	ost.eng = new(engine)
 
-	err := Restart().before(ost)
+	err := Restart().before(ctx, ost)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "state not found")
 
 	boot := mockBootstrap(&nodeRestarted, nil)
 	r := restart{bootstrap: boot}
-	err = r.after(ost)
+	err = r.after(ctx, ost)
 	require.NoError(t, err)
 	require.True(t, nodeRestarted)
 }
 
 func TestFallback(t *testing.T) {
-	fn := func() { Fallback().after(nil) }
+	ctx := context.Background()
+	fn := func() { Fallback().after(ctx, nil) }
 	require.PanicsWithValue(t, "fallback.after called before fallback.before", fn)
 
-	err := Fallback(noFallbackTest{}).before(nil)
+	err := Fallback(noFallbackTest{}).before(ctx, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "can't be used with fallback")
 
 	ctrl := gomock.NewController(t)
 	first := NewMockOperator(ctrl)
 	second := NewMockOperator(ctrl)
-	first.EXPECT().before(gomock.Any()).Return(fmt.Errorf("1"))
-	second.EXPECT().before(gomock.Any()).Return(fmt.Errorf("2"))
-	err = Fallback(first, second).before(nil)
+	first.EXPECT().before(ctx, gomock.Any()).Return(fmt.Errorf("1"))
+	second.EXPECT().before(ctx, gomock.Any()).Return(fmt.Errorf("2"))
+	err = Fallback(first, second).before(ctx, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "1, 2")
 
 	first = NewMockOperator(ctrl)
-	first.EXPECT().before(gomock.Any()).MaxTimes(1)
-	first.EXPECT().after(gomock.Any()).MaxTimes(1)
+	first.EXPECT().before(ctx, gomock.Any()).MaxTimes(1)
+	first.EXPECT().after(ctx, gomock.Any()).MaxTimes(1)
 	opr := Fallback(first)
-	err = opr.before(nil)
+	err = opr.before(ctx, nil)
 	require.NoError(t, err)
-	err = opr.after(nil)
+	err = opr.after(ctx, nil)
 	require.NoError(t, err)
 	ctrl.Finish()
 }
 
 func TestForceJoin(t *testing.T) {
+	ctx := context.Background()
 	resp := &raftpb.JoinResponse{
 		ID:      1,
 		Members: []raftpb.Member{{ID: 2}},
@@ -204,21 +213,22 @@ func TestForceJoin(t *testing.T) {
 
 	pool.
 		EXPECT().
-		Add(gomock.Eq(resp.Members[0])).
+		Add(ctx, gomock.Eq(resp.Members[0])).
 		Return(ErrNoLeader)
 
 	// it call join and set ost.
-	err := ForceJoin("", 0).before(ost)
+	err := ForceJoin("", 0).before(ctx, ost)
 	require.NoError(t, err)
 	require.Equal(t, resp.ID, ost.local.ID)
 	require.Equal(t, resp.Members, ost.membs)
 
 	// it call pool add.
-	err = ForceJoin("", 0).after(ost)
+	err = ForceJoin("", 0).after(ctx, ost)
 	require.Error(t, err)
 }
 
 func TestSetup(t *testing.T) {
+	ctx := context.Background()
 	setup := &setup{}
 	local := &raftpb.Member{ID: 10}
 	meta := pbutil.MustMarshal(local)
@@ -248,7 +258,7 @@ func TestSetup(t *testing.T) {
 
 	ids := map[uint64]struct{}{}
 	for i := 0; i < 20; i++ {
-		err := setup.before(ost)
+		err := setup.before(ctx, ost)
 		require.NoError(t, err)
 		require.False(t, ost.hasExistingState)
 
@@ -258,13 +268,13 @@ func TestSetup(t *testing.T) {
 	}
 
 	// assert it return's err onnn addr.
-	err := setup.after(ost)
+	err := setup.after(ctx, ost)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no address set")
 
 	// assert it boot from storage.
 	ost.local.Address = ":8080"
-	err = setup.after(ost)
+	err = setup.after(ctx, ost)
 	require.NoError(t, err)
 	require.Equal(t, local, ost.local)
 	require.Equal(t, hs, ost.hst)
@@ -275,6 +285,7 @@ func TestSetup(t *testing.T) {
 }
 
 func TestStateSetup(t *testing.T) {
+	ctx := context.Background()
 	table := []struct {
 		name      string
 		ost       operatorsState
@@ -330,7 +341,7 @@ func TestStateSetup(t *testing.T) {
 	for _, tt := range table {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			fn := func(*storage.Snapshot) error {
+			fn := func(context.Context, *storage.Snapshot) error {
 				called = true
 				if tt.expectErr {
 					return fmt.Errorf("")
@@ -344,9 +355,9 @@ func TestStateSetup(t *testing.T) {
 
 			ost := &tt.ost
 			ost.eng = new(engine)
-			ost.eng.cache = raft.NewMemoryStorage()
+			ost.eng.storage = raft.NewMemoryStorage()
 
-			err := ss.after(ost)
+			err := ss.after(ctx, ost)
 			require.Equal(t, tt.expectErr, err != nil)
 			require.Equal(t, tt.called, called)
 		})
@@ -354,6 +365,7 @@ func TestStateSetup(t *testing.T) {
 }
 
 func TestForceNewCluster(t *testing.T) {
+	ctx := context.Background()
 	ost := new(operatorsState)
 	ost.local = &raftpb.Member{ID: 1}
 	ost.membs = []raftpb.Member{
@@ -368,7 +380,7 @@ func TestForceNewCluster(t *testing.T) {
 			}},
 		},
 	}
-	ost.hst = etcdraftpb.HardState{
+	ost.hst = &etcdraftpb.HardState{
 		Commit: 2,
 	}
 	ost.ents = []etcdraftpb.Entry{
@@ -406,7 +418,7 @@ func TestForceNewCluster(t *testing.T) {
 
 	stg.
 		EXPECT().
-		SaveEntries(gomock.Any(), gomock.Any()).
+		SaveEntries(ctx, gomock.Any(), gomock.Any()).
 		Return(nil)
 
 	shotter.
@@ -421,7 +433,7 @@ func TestForceNewCluster(t *testing.T) {
 
 	ost.eng.storage = stg
 
-	err := ForceNewCluster().after(ost)
+	err := ForceNewCluster().after(ctx, ost)
 	confChange := 0
 	entNormal := 0
 	for _, ent := range ost.ents {
@@ -442,6 +454,7 @@ func TestForceNewCluster(t *testing.T) {
 }
 
 func TestRestore(t *testing.T) {
+	ctx := context.Background()
 	hs := etcdraftpb.HardState{
 		Term:   1,
 		Vote:   1,
@@ -469,12 +482,12 @@ func TestRestore(t *testing.T) {
 
 	stg.
 		EXPECT().
-		SaveEntries(gomock.Eq(hs), gomock.Any()).
+		SaveEntries(ctx, gomock.Eq(hs), gomock.Any()).
 		Return(nil)
 
 	stg.
 		EXPECT().
-		SaveSnapshot(gomock.Any()).
+		SaveSnapshot(ctx, gomock.Any()).
 		Return(nil)
 
 	stg.
@@ -493,16 +506,17 @@ func TestRestore(t *testing.T) {
 		Return(nil)
 
 	ost.hasExistingState = true
-	err := opr.before(ost)
+	err := opr.before(ctx, ost)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "found orphan node state")
 
 	ost.hasExistingState = false
-	err = opr.before(ost)
+	err = opr.before(ctx, ost)
 	require.NoError(t, err)
 }
 
 func TestRemovedMembers(t *testing.T) {
+	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	pool := membershipmock.NewMockPool(ctrl)
 	rm := new(removedMembers)
@@ -522,15 +536,15 @@ func TestRemovedMembers(t *testing.T) {
 			Data:  pbutil.MustMarshal(cc),
 		},
 	}
-	ost.hst = etcdraftpb.HardState{
+	ost.hst = &etcdraftpb.HardState{
 		Commit: 1,
 	}
 	ost.eng = &engine{
 		pool: pool,
 	}
 
-	pool.EXPECT().Add(gomock.Eq(*mem)).Return(ErrStopped)
-	err := rm.after(ost)
+	pool.EXPECT().Add(ctx, gomock.Eq(*mem)).Return(ErrStopped)
+	err := rm.after(ctx, ost)
 	require.Equal(t, ErrStopped, err)
 }
 

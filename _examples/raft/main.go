@@ -204,6 +204,8 @@ func save(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+var _ raft.StateMachine = (*stateMachine)(nil)
+
 func newstateMachine() *stateMachine {
 	return &stateMachine{
 		kv: make(map[string]string),

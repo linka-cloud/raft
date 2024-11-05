@@ -8,17 +8,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
-func newRemote(cfg Config, m raftpb.Member) (Member, error) {
+func newRemote(ctx context.Context, cfg Config, m raftpb.Member) (Member, error) {
 	connPerPipeline := 1
 	pipelineBufSize := 4096
-	ctx := cfg.Context()
 
 	if cfg.AllowPipelining() {
 		// The size ensures that pipeline does not drop messages when the network

@@ -1,15 +1,15 @@
 package raft
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/shaj13/raft/raftlog"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/raft/v3"
+	"go.etcd.io/raft/v3"
+
+	"github.com/shaj13/raft/raftlog"
 )
 
 func TestConfig(t *testing.T) {
@@ -42,12 +42,6 @@ func TestConfig(t *testing.T) {
 			expected: raft.ReadOnlyLeaseBased,
 			opt:      WithLinearizableReadLeaseBased(),
 			value:    func(c *config) interface{} { return c.rcfg.ReadOnlyOption },
-		},
-		{
-			defaults: context.Background(),
-			expected: context.TODO(),
-			opt:      WithContext(context.TODO()),
-			value:    func(c *config) interface{} { return c.ctx },
 		},
 		{
 			defaults: time.Millisecond * 100,

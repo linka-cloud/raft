@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	membershipmock "github.com/shaj13/raft/internal/mocks/membership"
 	raftenginemock "github.com/shaj13/raft/internal/mocks/raftengine"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"
-	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 func TestControllerPush(t *testing.T) {
@@ -48,7 +49,7 @@ func TestControllerJoin(t *testing.T) {
 			expect: func(c *controller) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(nil, false)
+				pool.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, false)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil)
 				eng.
@@ -71,8 +72,8 @@ func TestControllerJoin(t *testing.T) {
 				eng := raftenginemock.NewMockEngine(ctrl)
 				mem := membershipmock.NewMockMember(ctrl)
 				mem.EXPECT().Type().Return(VoterMember)
-				pool.EXPECT().Get(gomock.Any()).Return(mem, true).MaxTimes(2)
-				pool.EXPECT().Snapshot().Return(nil)
+				pool.EXPECT().Get(gomock.Any(), gomock.Any()).Return(mem, true).MaxTimes(2)
+				pool.EXPECT().Snapshot(gomock.Any()).Return(nil)
 				eng.EXPECT().Status().Return(raft.Status{}, nil)
 				eng.EXPECT().ProposeConfChange(gomock.Any(), gomock.Any(), gomock.Eq(etcdraftpb.ConfChangeUpdateNode)).Return(nil)
 				n := new(Node)

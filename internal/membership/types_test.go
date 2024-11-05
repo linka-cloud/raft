@@ -13,8 +13,8 @@ import (
 	raftpb "github.com/shaj13/raft/internal/raftpb"
 	transport "github.com/shaj13/raft/internal/transport"
 	raftlog "github.com/shaj13/raft/raftlog"
-	v3 "go.etcd.io/etcd/raft/v3"
-	raftpb0 "go.etcd.io/etcd/raft/v3/raftpb"
+	v3 "go.etcd.io/raft/v3"
+	raftpb0 "go.etcd.io/raft/v3/raftpb"
 )
 
 // MockMember is a mock of Member interface.
@@ -276,20 +276,6 @@ func (mr *MockConfigMockRecorder) AllowPipelining() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AllowPipelining", reflect.TypeOf((*MockConfig)(nil).AllowPipelining))
 }
 
-// Context mocks base method.
-func (m *MockConfig) Context() context.Context {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Context")
-	ret0, _ := ret[0].(context.Context)
-	return ret0
-}
-
-// Context indicates an expected call of Context.
-func (mr *MockConfigMockRecorder) Context() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Context", reflect.TypeOf((*MockConfig)(nil).Context))
-}
-
 // Dial mocks base method.
 func (m *MockConfig) Dial() transport.Dial {
 	m.ctrl.T.Helper()
@@ -384,32 +370,32 @@ func (m *MockPool) EXPECT() *MockPoolMockRecorder {
 }
 
 // Add mocks base method.
-func (m *MockPool) Add(arg0 raftpb.Member) error {
+func (m *MockPool) Add(arg0 context.Context, arg1 raftpb.Member) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Add", arg0)
+	ret := m.ctrl.Call(m, "Add", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Add indicates an expected call of Add.
-func (mr *MockPoolMockRecorder) Add(arg0 interface{}) *gomock.Call {
+func (mr *MockPoolMockRecorder) Add(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Add", reflect.TypeOf((*MockPool)(nil).Add), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Add", reflect.TypeOf((*MockPool)(nil).Add), arg0, arg1)
 }
 
 // Get mocks base method.
-func (m *MockPool) Get(arg0 uint64) (Member, bool) {
+func (m *MockPool) Get(arg0 context.Context, arg1 uint64) (Member, bool) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", arg0)
+	ret := m.ctrl.Call(m, "Get", arg0, arg1)
 	ret0, _ := ret[0].(Member)
 	ret1, _ := ret[1].(bool)
 	return ret0, ret1
 }
 
 // Get indicates an expected call of Get.
-func (mr *MockPoolMockRecorder) Get(arg0 interface{}) *gomock.Call {
+func (mr *MockPoolMockRecorder) Get(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockPool)(nil).Get), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockPool)(nil).Get), arg0, arg1)
 }
 
 // Members mocks base method.
@@ -427,17 +413,17 @@ func (mr *MockPoolMockRecorder) Members() *gomock.Call {
 }
 
 // NextID mocks base method.
-func (m *MockPool) NextID() uint64 {
+func (m *MockPool) NextID(ctx context.Context) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NextID")
+	ret := m.ctrl.Call(m, "NextID", ctx)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // NextID indicates an expected call of NextID.
-func (mr *MockPoolMockRecorder) NextID() *gomock.Call {
+func (mr *MockPoolMockRecorder) NextID(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextID", reflect.TypeOf((*MockPool)(nil).NextID))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextID", reflect.TypeOf((*MockPool)(nil).NextID), ctx)
 }
 
 // RegisterTypeMatcher mocks base method.
@@ -453,43 +439,43 @@ func (mr *MockPoolMockRecorder) RegisterTypeMatcher(arg0 interface{}) *gomock.Ca
 }
 
 // Remove mocks base method.
-func (m *MockPool) Remove(arg0 raftpb.Member) error {
+func (m *MockPool) Remove(arg0 context.Context, arg1 raftpb.Member) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Remove", arg0)
+	ret := m.ctrl.Call(m, "Remove", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Remove indicates an expected call of Remove.
-func (mr *MockPoolMockRecorder) Remove(arg0 interface{}) *gomock.Call {
+func (mr *MockPoolMockRecorder) Remove(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Remove", reflect.TypeOf((*MockPool)(nil).Remove), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Remove", reflect.TypeOf((*MockPool)(nil).Remove), arg0, arg1)
 }
 
 // Restore mocks base method.
-func (m *MockPool) Restore(arg0 []raftpb.Member) {
+func (m *MockPool) Restore(arg0 context.Context, arg1 []raftpb.Member) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Restore", arg0)
+	m.ctrl.Call(m, "Restore", arg0, arg1)
 }
 
 // Restore indicates an expected call of Restore.
-func (mr *MockPoolMockRecorder) Restore(arg0 interface{}) *gomock.Call {
+func (mr *MockPoolMockRecorder) Restore(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Restore", reflect.TypeOf((*MockPool)(nil).Restore), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Restore", reflect.TypeOf((*MockPool)(nil).Restore), arg0, arg1)
 }
 
 // Snapshot mocks base method.
-func (m *MockPool) Snapshot() []raftpb.Member {
+func (m *MockPool) Snapshot(arg0 context.Context) []raftpb.Member {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Snapshot")
+	ret := m.ctrl.Call(m, "Snapshot", arg0)
 	ret0, _ := ret[0].([]raftpb.Member)
 	return ret0
 }
 
 // Snapshot indicates an expected call of Snapshot.
-func (mr *MockPoolMockRecorder) Snapshot() *gomock.Call {
+func (mr *MockPoolMockRecorder) Snapshot(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Snapshot", reflect.TypeOf((*MockPool)(nil).Snapshot))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Snapshot", reflect.TypeOf((*MockPool)(nil).Snapshot), arg0)
 }
 
 // TearDown mocks base method.
@@ -507,15 +493,15 @@ func (mr *MockPoolMockRecorder) TearDown(arg0 interface{}) *gomock.Call {
 }
 
 // Update mocks base method.
-func (m *MockPool) Update(arg0 raftpb.Member) error {
+func (m *MockPool) Update(arg0 context.Context, arg1 raftpb.Member) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", arg0)
+	ret := m.ctrl.Call(m, "Update", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockPoolMockRecorder) Update(arg0 interface{}) *gomock.Call {
+func (mr *MockPoolMockRecorder) Update(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockPool)(nil).Update), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockPool)(nil).Update), arg0, arg1)
 }

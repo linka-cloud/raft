@@ -5,12 +5,13 @@
 package storagemock
 
 import (
+	context "context"
 	io "io"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
 	storage "github.com/shaj13/raft/internal/storage"
-	raftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	raftpb "go.etcd.io/raft/v3/raftpb"
 )
 
 // MockSnapshotter is a mock of Snapshotter interface.
@@ -134,11 +135,11 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 }
 
 // Boot mocks base method.
-func (m *MockStorage) Boot(arg0 []byte) ([]byte, raftpb.HardState, []raftpb.Entry, *storage.Snapshot, error) {
+func (m *MockStorage) Boot(arg0 []byte) ([]byte, *raftpb.HardState, []raftpb.Entry, *storage.Snapshot, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Boot", arg0)
 	ret0, _ := ret[0].([]byte)
-	ret1, _ := ret[1].(raftpb.HardState)
+	ret1, _ := ret[1].(*raftpb.HardState)
 	ret2, _ := ret[2].([]raftpb.Entry)
 	ret3, _ := ret[3].(*storage.Snapshot)
 	ret4, _ := ret[4].(error)
@@ -180,31 +181,31 @@ func (mr *MockStorageMockRecorder) Exist() *gomock.Call {
 }
 
 // SaveEntries mocks base method.
-func (m *MockStorage) SaveEntries(arg0 raftpb.HardState, arg1 []raftpb.Entry) error {
+func (m *MockStorage) SaveEntries(arg0 context.Context, arg1 *raftpb.HardState, arg2 []raftpb.Entry) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveEntries", arg0, arg1)
+	ret := m.ctrl.Call(m, "SaveEntries", arg0, arg1, arg2)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SaveEntries indicates an expected call of SaveEntries.
-func (mr *MockStorageMockRecorder) SaveEntries(arg0, arg1 interface{}) *gomock.Call {
+func (mr *MockStorageMockRecorder) SaveEntries(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveEntries", reflect.TypeOf((*MockStorage)(nil).SaveEntries), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveEntries", reflect.TypeOf((*MockStorage)(nil).SaveEntries), arg0, arg1, arg2)
 }
 
 // SaveSnapshot mocks base method.
-func (m *MockStorage) SaveSnapshot(arg0 raftpb.Snapshot) error {
+func (m *MockStorage) SaveSnapshot(arg0 context.Context, arg1 *raftpb.Snapshot) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveSnapshot", arg0)
+	ret := m.ctrl.Call(m, "SaveSnapshot", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SaveSnapshot indicates an expected call of SaveSnapshot.
-func (mr *MockStorageMockRecorder) SaveSnapshot(arg0 interface{}) *gomock.Call {
+func (mr *MockStorageMockRecorder) SaveSnapshot(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveSnapshot", reflect.TypeOf((*MockStorage)(nil).SaveSnapshot), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveSnapshot", reflect.TypeOf((*MockStorage)(nil).SaveSnapshot), arg0, arg1)
 }
 
 // Snapshotter mocks base method.

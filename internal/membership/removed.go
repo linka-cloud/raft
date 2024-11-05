@@ -5,8 +5,9 @@ import (
 	"errors"
 	"time"
 
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/raftpb"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 var errRemovedMember = errors.New("raft/membership: member was removed")

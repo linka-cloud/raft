@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"go.etcd.io/etcd/pkg/v3/pbutil"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"

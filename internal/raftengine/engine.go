@@ -5,12 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime/trace"
 	"sync"
 	"time"
 
 	"go.etcd.io/etcd/pkg/v3/idutil"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/atomic"
 	"github.com/shaj13/raft/internal/membership"
@@ -35,9 +36,6 @@ var (
 	ErrFailedPrecondition = errors.New("raft: precondition failed")
 )
 
-//go:generate mockgen -package raftenginemock  -source internal/raftengine/engine.go -destination internal/mocks/raftengine/engine.go
-//go:generate mockgen -package raftengine  -source vendor/go.etcd.io/etcd/raft/v3/node.go -destination internal/raftengine/node_test.go
-
 // Engine represents the underlying raft node processor.
 type Engine interface {
 	LinearizableRead(ctx context.Context) error
@@ -47,8 +45,9 @@ type Engine interface {
 	Shutdown(context.Context) error
 	ProposeReplicate(ctx context.Context, data []byte) error
 	ProposeConfChange(ctx context.Context, m *raftpb.Member, t etcdraftpb.ConfChangeType) error
+	ForgetLeader(ctx context.Context) error
 	CreateSnapshot() (etcdraftpb.Snapshot, error)
-	Start(addr string, oprs ...Operator) error
+	Start(ctx context.Context, addr string, oprs ...Operator) error
 	ReportUnreachable(id uint64)
 	ReportSnapshot(id uint64, status raft.SnapshotStatus)
 	ReportShutdown(id uint64)
@@ -67,7 +66,7 @@ func New(cfg Config) Engine {
 	d.snapIndex = atomic.NewUint64()
 	d.snapshoting = atomic.NewBool()
 	d.logger = cfg.Logger()
-	d.stateCh = cfg.StateChangeCh()
+	d.statec = cfg.StateChangeCh()
 	return d
 }
 
@@ -86,9 +85,11 @@ type engine struct {
 	propwg sync.WaitGroup
 	// processwg waits for all the process goroutines to be terminated before
 	// shutting down the node.
-	processwg    sync.WaitGroup
-	cache        *raft.MemoryStorage
-	storage      storage.Storage
+	processwg sync.WaitGroup
+	// cache     *raft.MemoryStorage
+	// cache *raftwal.DiskStorage
+	storage storage.Storage
+	// storage      *raftwal.DiskStorage
 	msgbus       *msgbus.MsgBus
 	idgen        *idutil.Generator
 	pool         membership.Pool
@@ -101,7 +102,10 @@ type engine struct {
 	snapshotc    chan chan error
 	confState    *etcdraftpb.ConfState
 	logger       raftlog.Logger
-	stateCh      chan raft.StateType
+	statec       chan raft.StateType
+	appendc      chan etcdraftpb.Message
+	applyc       chan etcdraftpb.Message
+	leader       bool
 }
 
 func (eng *engine) LinearizableRead(ctx context.Context) error {
@@ -258,7 +262,7 @@ func (eng *engine) Shutdown(ctx context.Context) error {
 		nopClose(func() { close(eng.snapshotc) }),
 		nopClose(eng.node.Stop),
 		eng.msgbus.Close,
-		eng.storage.Close,
+		// eng.storage.Close,
 		func() error {
 			return eng.pool.TearDown(ctx)
 		},
@@ -306,6 +310,9 @@ func (eng *engine) TransferLeadership(ctx context.Context, transferee uint64) er
 
 // ProposeReplicate proposes to replicate the data to be appended to the raft eng.logger.
 func (eng *engine) ProposeReplicate(ctx context.Context, data []byte) error {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.ProposeReplicate")
+	defer tr.End()
+
 	if eng.started.False() {
 		return ErrStopped
 	}
@@ -351,6 +358,10 @@ func (eng *engine) ProposeConfChange(ctx context.Context, m *raftpb.Member, cct 
 	return eng.wait(ctx, id)
 }
 
+func (eng *engine) ForgetLeader(ctx context.Context) error {
+	return eng.node.ForgetLeader(ctx)
+}
+
 // CreateSnapshot begin a snapshot and return snap metadata.
 func (eng *engine) CreateSnapshot() (etcdraftpb.Snapshot, error) {
 	if eng.started.False() {
@@ -362,7 +373,8 @@ func (eng *engine) CreateSnapshot() (etcdraftpb.Snapshot, error) {
 
 	if appliedIndex == snapIndex {
 		// up to date just return the latest snap to load it from disk.
-		return eng.cache.Snapshot()
+		// return eng.storage.Snapshot()
+		return eng.storage.Snapshot()
 	}
 
 	c := make(chan error)
@@ -371,16 +383,20 @@ func (eng *engine) CreateSnapshot() (etcdraftpb.Snapshot, error) {
 		return etcdraftpb.Snapshot{}, err
 	}
 
-	return eng.cache.Snapshot()
+	// return eng.storage.Snapshot()
+	return eng.storage.Snapshot()
 }
 
 // Start engine.
-func (eng *engine) Start(addr string, oprs ...Operator) error {
+func (eng *engine) Start(ctx context.Context, addr string, oprs ...Operator) error {
+	ctx, t := trace.NewTask(ctx, "raft.Start")
+	defer t.End()
+
 	sp := setup{addr: addr}
 	ssp := stateSetup{publishSnapshotFile: eng.publishSnapshotFile}
 	rm := removedMembers{}
 	oprs = append(oprs, sp, ssp, rm)
-	ost, err := invoke(eng, oprs...)
+	ost, err := invoke(ctx, eng, oprs...)
 	if err != nil {
 		return err
 	}
@@ -392,18 +408,21 @@ func (eng *engine) Start(addr string, oprs ...Operator) error {
 	// set local member.
 	eng.local = ost.local
 	eng.idgen = idutil.NewGenerator(uint16(eng.local.ID), time.Now())
-	eng.ctx, eng.cancel = context.WithCancel(eng.cfg.Context())
+	eng.ctx, eng.cancel = context.WithCancel(ctx)
 	eng.proposec = make(chan etcdraftpb.Message, 4096)
 	eng.msgc = make(chan etcdraftpb.Message, 4096)
 	eng.snapshotc = make(chan chan error)
+	eng.appendc = make(chan etcdraftpb.Message, 4094)
+	eng.applyc = make(chan etcdraftpb.Message, 4094)
 	eng.started.Set()
 
-	eng.process(eng.proposec)
-	eng.process(eng.msgc)
-	return eng.eventLoop()
+	eng.process(ctx, eng.proposec)
+	eng.process(ctx, eng.msgc)
+	return eng.eventLoop(ctx)
+	// return eng.asyncEventLoop(ctx)
 }
 
-func (eng *engine) eventLoop() error {
+func (eng *engine) eventLoop(ctx context.Context) error {
 	eng.wg.Add(1)
 	defer eng.wg.Done()
 
@@ -415,50 +434,184 @@ func (eng *engine) eventLoop() error {
 		case <-ticker.C:
 			eng.node.Tick()
 		case rd := <-eng.node.Ready():
-			prevIndex := eng.appliedIndex.Get()
-
-			if err := eng.storage.SaveEntries(rd.HardState, rd.Entries); err != nil {
+			if err := eng.do(ctx, rd); err != nil {
 				return err
 			}
-
-			if err := eng.publishSnapshot(rd.Snapshot); err != nil {
-				return err
-			}
-
-			if err := eng.cache.Append(rd.Entries); err != nil {
-				return err
-			}
-
-			eng.send(rd.Messages)
-
-			if rd.SoftState != nil {
-				if rd.SoftState.Lead == raft.None {
-					eng.msgbus.BroadcastToAll(ErrNoLeader)
-				}
-				go func() {
-					if eng.stateCh != nil {
-						select {
-						case <-eng.stateCh:
-						case eng.stateCh <- rd.SoftState.RaftState:
-						default:
-						}
-					}
-				}()
-			}
-
-			eng.publishCommitted(rd.CommittedEntries)
-			eng.publishReadState(rd.ReadStates)
-			eng.publishAppliedIndices(prevIndex, eng.appliedIndex.Get())
-			eng.promotions()
-			eng.maybeCreateSnapshot()
-			eng.node.Advance()
 		case c := <-eng.snapshotc:
-			c <- eng.createSnapshot()
+			// c <- eng.createSnapshot(ctx)
+			c <- nil
 		case <-eng.ctx.Done():
 			return ErrStopped
 		}
 	}
 }
+
+func (eng *engine) do(ctx context.Context, rd raft.Ready) error {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.do")
+	defer tr.End()
+
+	prevIndex := eng.appliedIndex.Get()
+
+	if rd.SoftState != nil {
+		eng.leader = rd.RaftState == raft.StateLeader
+		if rd.SoftState.Lead == raft.None {
+			eng.msgbus.BroadcastToAll(ErrNoLeader)
+		}
+		go func() {
+			if eng.statec != nil {
+				select {
+				case <-eng.statec:
+				case eng.statec <- rd.SoftState.RaftState:
+				default:
+				}
+			}
+		}()
+	}
+
+	var wg sync.WaitGroup
+	if eng.leader {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			eng.send(ctx, rd.Messages)
+		}()
+	}
+
+	if err := eng.saveEntries(ctx, &rd.HardState, rd.Entries); err != nil {
+		return err
+	}
+
+	if err := eng.publishSnapshot(ctx, &rd.Snapshot); err != nil {
+		return err
+	}
+
+	// if err := eng.cache.Append(rd.Entries); err != nil {
+	// 	return err
+	// }
+
+	eng.publishCommitted(ctx, rd.CommittedEntries)
+	eng.publishReadState(ctx, rd.ReadStates)
+	eng.publishAppliedIndices(ctx, prevIndex, eng.appliedIndex.Get())
+	eng.promotions(ctx)
+	eng.maybeCreateSnapshot(ctx)
+	if !eng.leader {
+		eng.send(ctx, rd.Messages)
+	} else {
+		wg.Wait()
+	}
+	eng.node.Advance()
+	return nil
+}
+
+func (eng *engine) saveEntries(ctx context.Context, hs *etcdraftpb.HardState, es []etcdraftpb.Entry) error {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.saveEntries")
+	defer tr.End()
+	if err := eng.storage.SaveEntries(ctx, hs, es); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (eng *engine) asyncEventLoop(ctx context.Context) error {
+	eng.wg.Add(1)
+	defer eng.wg.Done()
+
+	ticker := time.NewTicker(eng.cfg.TickInterval())
+	defer ticker.Stop()
+
+	errs := make(chan error, 2)
+
+	go eng.appendLoop(ctx, errs)
+	go eng.applyLoop(ctx, errs)
+
+	for {
+		select {
+		case <-ticker.C:
+			eng.node.Tick()
+		case rd := <-eng.node.Ready():
+			for _, v := range rd.Messages {
+				switch v.Type {
+				case etcdraftpb.MsgStorageAppend:
+					eng.appendc <- v
+				case etcdraftpb.MsgStorageApply:
+					eng.applyc <- v
+				default:
+					eng.send(ctx, []etcdraftpb.Message{v})
+				}
+			}
+			eng.publishReadState(ctx, rd.ReadStates)
+			if rd.SoftState != nil {
+				eng.leader = rd.RaftState == raft.StateLeader
+				if rd.SoftState.Lead == raft.None {
+					eng.msgbus.BroadcastToAll(ErrNoLeader)
+				}
+				go func() {
+					if eng.statec != nil {
+						select {
+						case <-eng.statec:
+						case eng.statec <- rd.SoftState.RaftState:
+						default:
+						}
+					}
+				}()
+			}
+		case c := <-eng.snapshotc:
+			c <- eng.createSnapshot(ctx)
+		case <-eng.ctx.Done():
+			return ErrStopped
+		}
+	}
+}
+
+func (eng *engine) appendLoop(ctx context.Context, errs chan error) {
+	eng.wg.Add(1)
+	defer eng.wg.Done()
+	errs <- func() error {
+		for {
+			select {
+			case m := <-eng.appendc:
+				hs := etcdraftpb.HardState{
+					Term:   m.Term,
+					Vote:   m.Vote,
+					Commit: m.Commit,
+				}
+				if err := eng.saveEntries(ctx, &hs, m.Entries); err != nil {
+					return err
+				}
+				eng.send(ctx, m.Responses)
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}()
+}
+
+func (eng *engine) applyLoop(ctx context.Context, errs chan error) {
+	eng.wg.Add(1)
+	defer eng.wg.Done()
+	errs <- func() error {
+		for {
+			select {
+			case m := <-eng.applyc:
+				prevIndex := eng.appliedIndex.Get()
+				eng.publishCommitted(ctx, m.Entries)
+				eng.publishAppliedIndices(ctx, prevIndex, eng.appliedIndex.Get())
+				eng.promotions(ctx)
+				eng.maybeCreateSnapshot(ctx)
+				eng.send(ctx, m.Responses)
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	}()
+}
+
+// func (eng *engine) cacheEntries(ctx context.Context, entries []etcdraftpb.Entry) error {
+// 	ctx, tr := trace.NewTask(ctx, "raft.engine.cacheEntries")
+// 	defer tr.End()
+//
+// 	return eng.cache.Append(entries)
+// }
 
 func (eng *engine) proposeConfChange(
 	ctx context.Context,
@@ -482,21 +635,28 @@ func (eng *engine) proposeConfChange(
 	return cc.ID, eng.node.ProposeConfChange(ctx, cc)
 }
 
-func (eng *engine) publishReadState(rss []raft.ReadState) {
+func (eng *engine) publishReadState(ctx context.Context, rss []raft.ReadState) {
+	ctx, t := trace.NewTask(ctx, "raft.engine.publishReadState")
+	defer t.End()
 	for _, rs := range rss {
 		id := binary.BigEndian.Uint64(rs.RequestCtx)
 		eng.msgbus.Broadcast(id, rs.Index)
 	}
 }
 
-func (eng *engine) publishAppliedIndices(prev, curr uint64) {
+func (eng *engine) publishAppliedIndices(ctx context.Context, prev, curr uint64) {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.publishAppliedIndices")
+	defer tr.End()
+
 	for i := prev + 1; i < curr+1; i++ {
 		eng.msgbus.Broadcast(i, nil)
 	}
 }
 
-func (eng *engine) publishSnapshot(snap etcdraftpb.Snapshot) error {
-	if raft.IsEmptySnap(snap) {
+func (eng *engine) publishSnapshot(ctx context.Context, snap *etcdraftpb.Snapshot) error {
+	ctx, t := trace.NewTask(ctx, "raft.engine.publishSnapshot")
+	defer t.End()
+	if raft.IsEmptySnap(*snap) {
 		return nil
 	}
 
@@ -508,7 +668,7 @@ func (eng *engine) publishSnapshot(snap etcdraftpb.Snapshot) error {
 		)
 	}
 
-	if err := eng.storage.SaveSnapshot(snap); err != nil {
+	if err := eng.storage.SaveSnapshot(ctx, snap); err != nil {
 		return err
 	}
 
@@ -518,17 +678,19 @@ func (eng *engine) publishSnapshot(snap etcdraftpb.Snapshot) error {
 		return err
 	}
 
-	return eng.publishSnapshotFile(sf)
+	return eng.publishSnapshotFile(ctx, sf)
 }
 
-func (eng *engine) publishSnapshotFile(sf *storage.Snapshot) error {
+func (eng *engine) publishSnapshotFile(ctx context.Context, sf *storage.Snapshot) error {
+	ctx, t := trace.NewTask(ctx, "raft.engine.publishSnapshotFile")
+	defer t.End()
 	snap := sf.Raw
 
-	if err := eng.cache.ApplySnapshot(snap); err != nil {
+	if err := eng.storage.ApplySnapshot(snap); err != nil {
 		return err
 	}
 
-	eng.pool.Restore(sf.Members)
+	eng.pool.Restore(ctx, sf.Members)
 
 	if err := eng.fsm.Restore(sf.Data); err != nil {
 		return err
@@ -540,19 +702,23 @@ func (eng *engine) publishSnapshotFile(sf *storage.Snapshot) error {
 	return nil
 }
 
-func (eng *engine) publishCommitted(ents []etcdraftpb.Entry) {
+func (eng *engine) publishCommitted(ctx context.Context, ents []etcdraftpb.Entry) {
+	ctx, t := trace.NewTask(ctx, "raft.engine.publishCommitted")
+	defer t.End()
 	for _, ent := range ents {
 		if ent.Type == etcdraftpb.EntryNormal && len(ent.Data) > 0 {
-			eng.publishReplicate(ent)
+			eng.publishReplicate(ctx, ent)
 		}
 		if ent.Type == etcdraftpb.EntryConfChange {
-			eng.publishConfChange(ent)
+			eng.publishConfChange(ctx, ent)
 		}
 		eng.appliedIndex.Set(ent.Index)
 	}
 }
 
-func (eng *engine) publishReplicate(ent etcdraftpb.Entry) {
+func (eng *engine) publishReplicate(ctx context.Context, ent etcdraftpb.Entry) {
+	ctx, t := trace.NewTask(ctx, "raft.engine.publishReplicate")
+	defer t.End()
 	var err error
 	r := new(raftpb.Replicate)
 	defer func() {
@@ -575,7 +741,9 @@ func (eng *engine) publishReplicate(ent etcdraftpb.Entry) {
 	return
 }
 
-func (eng *engine) publishConfChange(ent etcdraftpb.Entry) {
+func (eng *engine) publishConfChange(ctx context.Context, ent etcdraftpb.Entry) {
+	ctx, t := trace.NewTask(ctx, "raft.engine.publishConfChange")
+	defer t.End()
 	var err error
 	cc := new(etcdraftpb.ConfChange)
 	mem := new(raftpb.Member)
@@ -603,9 +771,9 @@ func (eng *engine) publishConfChange(ent etcdraftpb.Entry) {
 
 	switch cc.Type {
 	case etcdraftpb.ConfChangeAddNode, etcdraftpb.ConfChangeAddLearnerNode:
-		err = eng.pool.Add(*mem)
+		err = eng.pool.Add(ctx, *mem)
 	case etcdraftpb.ConfChangeUpdateNode:
-		err = eng.pool.Update(*mem)
+		err = eng.pool.Update(ctx, *mem)
 	case etcdraftpb.ConfChangeRemoveNode:
 		eng.wg.Add(1)
 		go func(mem raftpb.Member) {
@@ -614,10 +782,10 @@ func (eng *engine) publishConfChange(ent etcdraftpb.Entry) {
 			// wait for two ticks then go and remove the member from the pool.
 			// to make sure the commit ack sent before closing connection.
 			case <-time.After(eng.cfg.TickInterval() * 2):
-				if err := eng.pool.Remove(mem); err != nil {
+				if err := eng.pool.Remove(ctx, mem); err != nil {
 					eng.logger.Errorf("raft.engine: removing member %x: %v", mem.ID, err)
 				}
-			case <-eng.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}(*mem)
@@ -627,25 +795,31 @@ func (eng *engine) publishConfChange(ent etcdraftpb.Entry) {
 }
 
 // process the incoming messages from the given chan.
-func (eng *engine) process(c chan etcdraftpb.Message) {
+func (eng *engine) process(ctx context.Context, c chan etcdraftpb.Message) {
+	ctx, t := trace.NewTask(ctx, "raft.engine.process")
+	defer t.End()
+
 	eng.processwg.Add(1)
 	go func() {
 		defer eng.processwg.Done()
 		// process must keep processing msg until c closed or ctx.Done(),
 		// for graceful shutdown purposes.
 		for m := range c {
-			if err := eng.ctx.Err(); err != nil {
+			if err := ctx.Err(); err != nil {
 				return
 			}
 
-			if err := eng.node.Step(eng.ctx, m); err != nil {
+			if err := eng.node.Step(ctx, m); err != nil {
 				eng.logger.Warningf("raft.engine: process raft message: %v", err)
 			}
 		}
 	}()
 }
 
-func (eng *engine) send(msgs []etcdraftpb.Message) {
+func (eng *engine) send(ctx context.Context, msgs []etcdraftpb.Message) {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.send")
+	defer tr.End()
+
 	lg := func(m etcdraftpb.Message, str string) {
 		eng.logger.Warningf(
 			"raft.engine: sending message %s to member %x: %v",
@@ -656,13 +830,19 @@ func (eng *engine) send(msgs []etcdraftpb.Message) {
 	}
 
 	for _, m := range msgs {
-		mem, ok := eng.pool.Get(m.To)
+		if m.To == eng.local.ID {
+			if err := eng.node.Step(ctx, m); err != nil {
+				lg(m, err.Error())
+			}
+			continue
+		}
+		mem, ok := eng.pool.Get(ctx, m.To)
 		if !ok {
 			lg(m, "unknown member")
 			continue
 		}
 
-		if eng.forceSnapshot(m) {
+		if eng.forceSnapshot(ctx, m) {
 			continue
 		}
 
@@ -672,7 +852,10 @@ func (eng *engine) send(msgs []etcdraftpb.Message) {
 	}
 }
 
-func (eng *engine) promotions() {
+func (eng *engine) promotions(ctx context.Context) {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.promotions")
+	defer tr.End()
+
 	rs := eng.node.Status()
 
 	// the current node is not the leader.
@@ -718,7 +901,7 @@ func (eng *engine) promotions() {
 
 	for _, m := range promotions {
 		eng.logger.Infof("raft.engine: promoting staging member %x", m.ID)
-		ctx, cancel := context.WithTimeout(eng.ctx, eng.cfg.TickInterval()*5)
+		ctx, cancel := context.WithTimeout(ctx, eng.cfg.TickInterval()*5)
 		_, err := eng.proposeConfChange(ctx, &m, etcdraftpb.ConfChangeAddNode)
 		if err != nil {
 			eng.logger.Warningf("raft.engine: promoting staging member %x: %v", m.ID, err)
@@ -727,7 +910,10 @@ func (eng *engine) promotions() {
 	}
 }
 
-func (eng *engine) forceSnapshot(msg etcdraftpb.Message) bool {
+func (eng *engine) forceSnapshot(ctx context.Context, msg etcdraftpb.Message) bool {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.forceSnapshot")
+	defer tr.End()
+
 	if msg.Type != etcdraftpb.MsgSnap {
 		return false
 	}
@@ -763,19 +949,22 @@ func (eng *engine) forceSnapshot(msg etcdraftpb.Message) bool {
 	// report snapshot failure, to re-send the new snapshot.
 	defer eng.ReportSnapshot(msg.To, raft.SnapshotFailure)
 
-	if err := eng.createSnapshot(); err != nil {
+	if err := eng.createSnapshot(ctx); err != nil {
 		eng.logger.Warningf("raft.engine: force new snapshot: %v", err)
 	}
 
 	return true
 }
 
-func (eng *engine) maybeCreateSnapshot() {
+func (eng *engine) maybeCreateSnapshot(ctx context.Context) {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.maybeCreateSnapshot")
+	defer tr.End()
+
 	if eng.appliedIndex.Get()-eng.snapIndex.Get() <= eng.cfg.SnapInterval() || eng.snapshoting.True() {
 		return
 	}
 
-	if err := eng.createSnapshot(); err != nil {
+	if err := eng.createSnapshot(ctx); err != nil {
 		if errors.Is(err, ErrFailedPrecondition) {
 			return
 		}
@@ -787,7 +976,10 @@ func (eng *engine) maybeCreateSnapshot() {
 	}
 }
 
-func (eng *engine) createSnapshot() error {
+func (eng *engine) createSnapshot(ctx context.Context) error {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.createSnapshot")
+	defer tr.End()
+
 	appliedIndex := eng.appliedIndex.Get()
 	snapIndex := eng.snapIndex.Get()
 
@@ -813,7 +1005,7 @@ func (eng *engine) createSnapshot() error {
 		snapIndex,
 	)
 
-	snap, err := eng.cache.CreateSnapshot(appliedIndex, eng.confState, nil)
+	snap, err := eng.storage.CreateSnapshot(ctx, appliedIndex, eng.confState, nil)
 	if err != nil {
 		eng.snapshoting.UnSet()
 		return err
@@ -822,7 +1014,7 @@ func (eng *engine) createSnapshot() error {
 	ss := storage.Snapshot{
 		SnapshotState: raftpb.SnapshotState{
 			Raw:     snap,
-			Members: eng.pool.Snapshot(),
+			Members: eng.pool.Snapshot(ctx),
 		},
 		Data: r,
 	}
@@ -834,7 +1026,7 @@ func (eng *engine) createSnapshot() error {
 			return err
 		}
 
-		if err := eng.storage.SaveSnapshot(snap); err != nil {
+		if err := eng.storage.SaveSnapshot(ctx, &snap); err != nil {
 			return err
 		}
 
@@ -845,7 +1037,7 @@ func (eng *engine) createSnapshot() error {
 		}
 
 		compactIndex := appliedIndex - eng.cfg.SnapInterval()
-		if err := eng.cache.Compact(compactIndex); err != nil {
+		if err := eng.storage.Compact(compactIndex); err != nil {
 			return err
 		}
 
@@ -869,6 +1061,9 @@ func (eng *engine) createSnapshot() error {
 }
 
 func (eng *engine) wait(ctx context.Context, id uint64) error {
+	ctx, tr := trace.NewTask(ctx, "raft.engine.wait")
+	defer tr.End()
+
 	sub := eng.msgbus.SubscribeOnce(id)
 	defer sub.Unsubscribe()
 

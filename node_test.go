@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+	"go.etcd.io/raft/v3/tracker"
+
 	"github.com/shaj13/raft/internal/membership"
 	membershipmock "github.com/shaj13/raft/internal/mocks/membership"
 	raftenginemock "github.com/shaj13/raft/internal/mocks/raftengine"
@@ -14,10 +19,6 @@ import (
 	transportmock "github.com/shaj13/raft/internal/mocks/transport"
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"
-	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
-	"go.etcd.io/etcd/raft/v3/tracker"
 )
 
 func TestNodePreConditions(t *testing.T) {
@@ -28,29 +29,29 @@ func TestNodePreConditions(t *testing.T) {
 	ctx := context.TODO()
 
 	table := []struct {
-		call     func(n *Node) error
-		expected []func(c *Node) error
+		call     func(ctx context.Context, n *Node) error
+		expected []func(ctx context.Context, c *Node) error
 	}{
 		{
-			call: func(n *Node) error { return n.LinearizableRead(ctx) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.LinearizableRead(ctx) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				noLeader(),
 				available(),
 			},
 		},
 		{
-			call: func(n *Node) error {
-				_, err := n.Snapshot()
+			call: func(ctx context.Context, n *Node) error {
+				_, err := n.Snapshot(ctx)
 				return err
 			},
-			expected: []func(c *Node) error{
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 			},
 		},
 		{
-			call: func(n *Node) error { return n.TransferLeadership(ctx, 0) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.TransferLeadership(ctx, 0) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				notMember(0),
 				memberRemoved(0),
@@ -61,16 +62,16 @@ func TestNodePreConditions(t *testing.T) {
 			},
 		},
 		{
-			call: func(n *Node) error { return n.Stepdown(ctx) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.Stepdown(ctx) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				notLeader(),
 				available(),
 			},
 		},
 		{
-			call: func(n *Node) error { return n.Replicate(ctx, nil) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.Replicate(ctx, nil) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				noLeader(),
 				notType(0, 0),
@@ -79,8 +80,8 @@ func TestNodePreConditions(t *testing.T) {
 			},
 		},
 		{
-			call: func(n *Node) error { return n.UpdateMember(ctx, new(RawMember)) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.UpdateMember(ctx, new(RawMember)) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				notMember(0),
 				memberRemoved(0),
@@ -92,8 +93,8 @@ func TestNodePreConditions(t *testing.T) {
 			},
 		},
 		{
-			call: func(n *Node) error { return n.RemoveMember(ctx, 0) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.RemoveMember(ctx, 0) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				notMember(0),
 				memberRemoved(0),
@@ -105,8 +106,8 @@ func TestNodePreConditions(t *testing.T) {
 			},
 		},
 		{
-			call: func(n *Node) error { return n.AddMember(ctx, new(RawMember)) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.AddMember(ctx, new(RawMember)) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				idInUse(0),
 				addressInUse(0, ""),
@@ -117,8 +118,8 @@ func TestNodePreConditions(t *testing.T) {
 			},
 		},
 		{
-			call: func(n *Node) error { return n.PromoteMember(ctx, 0) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.PromoteMember(ctx, 0) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				notMember(0),
 				noLeader(),
@@ -129,8 +130,8 @@ func TestNodePreConditions(t *testing.T) {
 			},
 		},
 		{
-			call: func(n *Node) error { return n.DemoteMember(ctx, 0) },
-			expected: []func(c *Node) error{
+			call: func(ctx context.Context, n *Node) error { return n.DemoteMember(ctx, 0) },
+			expected: []func(ctx context.Context, c *Node) error{
 				joined(),
 				notMember(0),
 				memberRemoved(0),
@@ -146,15 +147,15 @@ func TestNodePreConditions(t *testing.T) {
 
 	for _, tt := range table {
 		terr := fmt.Errorf("TestNodePreConditions")
-		got := []func(c *Node) error{}
+		got := []func(ctx context.Context, c *Node) error{}
 		node := new(Node)
 		node.engine = eng
-		node.exec = func(fns ...func(c *Node) error) error {
+		node.exec = func(ctx context.Context, fns ...func(ctx context.Context, c *Node) error) error {
 			got = fns
 			return terr
 		}
 
-		err := tt.call(node)
+		err := tt.call(ctx, node)
 		require.Equal(t, terr, err)
 		require.Equal(t, len(tt.expected), len(got))
 
@@ -166,22 +167,22 @@ func TestNodePreConditions(t *testing.T) {
 
 func TestNodePreCond(t *testing.T) {
 	table := []struct {
-		fn  func(n *Node) error
+		fn  func(ctx context.Context, n *Node) error
 		err error
 	}{
 		{
-			fn:  func(n *Node) error { return ErrNotLeader },
+			fn:  func(ctx context.Context, n *Node) error { return ErrNotLeader },
 			err: ErrNotLeader,
 		},
 		{
-			fn:  func(n *Node) error { return nil },
+			fn:  func(ctx context.Context, n *Node) error { return nil },
 			err: nil,
 		},
 	}
 
 	for _, tt := range table {
 		n := new(Node)
-		err := n.preCond(tt.fn)
+		err := n.preCond(context.Background(), tt.fn)
 		require.Equal(t, tt.err, err)
 	}
 }
@@ -229,7 +230,7 @@ func TestNodeSnapshot(t *testing.T) {
 	n.engine = eng
 	n.exec = testPreCond
 	n.storage = stg
-	_, err := n.Snapshot()
+	_, err := n.Snapshot(context.Background())
 	require.NoError(t, err)
 }
 
@@ -287,7 +288,7 @@ func TestNodeUpdateMember(t *testing.T) {
 	eng.EXPECT().ProposeConfChange(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	eng.EXPECT().Status().Return(raft.Status{}, nil)
 	m1.EXPECT().Type().Return(LearnerMember)
-	pool.EXPECT().Get(gomock.Any()).Return(m1, true)
+	pool.EXPECT().Get(context.Background(), gomock.Any()).Return(m1, true)
 
 	raw := &RawMember{}
 	n := new(Node)
@@ -332,7 +333,7 @@ func TestNodeAddMember(t *testing.T) {
 		ProposeConfChange(gomock.Any(), gomock.Any(), gomock.Eq(etcdraftpb.ConfChangeAddLearnerNode)).
 		Return(nil)
 	eng.EXPECT().Status().Return(raft.Status{}, nil)
-	pool.EXPECT().NextID().Return(id)
+	pool.EXPECT().NextID(context.Background()).Return(id)
 
 	n := new(Node)
 	n.engine = eng
@@ -385,7 +386,7 @@ func TestNodeStart(t *testing.T) {
 	eng.EXPECT().Start(gomock.Any(), gomock.Any()).Return(nil)
 	n := new(Node)
 	n.engine = eng
-	err := n.Start()
+	err := n.Start(context.Background())
 	require.NoError(t, err)
 }
 
@@ -403,7 +404,7 @@ func TestNodePromoteMember(t *testing.T) {
 	n.cfg = newConfig()
 
 	eng.EXPECT().Status().Return(raft.Status{}, nil).AnyTimes()
-	pool.EXPECT().Get(gomock.Any()).Return(mem, true).AnyTimes()
+	pool.EXPECT().Get(ctx, gomock.Any()).Return(mem, true).AnyTimes()
 	mem.EXPECT().Raw().Return(RawMember{}).AnyTimes()
 	mem.EXPECT().Address().Return("").AnyTimes()
 	mem.EXPECT().ID().Return(uint64(1)).AnyTimes()
@@ -466,18 +467,18 @@ func TestNodePromoteMember(t *testing.T) {
 func TestPreConditions(t *testing.T) {
 	nilErr := fmt.Errorf("<nil>")
 	table := []struct {
-		fn       func(c *Node) error
+		fn       func(ctx context.Context, c *Node) error
 		contains string
-		expect   func(c *Node)
+		expect   func(ctx context.Context, c *Node)
 	}{
 		{
 			fn:       notType(1, VoterMember),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				mem := membershipmock.NewMockMember(ctrl)
-				pool.EXPECT().Get(gomock.Eq(uint64(1))).Return(mem, true)
+				pool.EXPECT().Get(ctx, gomock.Eq(uint64(1))).Return(mem, true)
 				mem.EXPECT().Type().Return(VoterMember)
 				n.pool = pool
 			},
@@ -485,11 +486,11 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       notType(1, VoterMember),
 			contains: "not a voter",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				mem := membershipmock.NewMockMember(ctrl)
-				pool.EXPECT().Get(gomock.Eq(uint64(1))).Return(mem, true)
+				pool.EXPECT().Get(ctx, gomock.Eq(uint64(1))).Return(mem, true)
 				mem.EXPECT().Type().Return(LearnerMember)
 				n.pool = pool
 			},
@@ -497,7 +498,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       disableForwarding(),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil).MaxTimes(2)
@@ -508,7 +509,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       disableForwarding(),
 			contains: ErrNotLeader.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{
@@ -523,7 +524,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       noLeader(),
 			contains: "no elected cluster leader",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil)
@@ -533,7 +534,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       noLeader(),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{
@@ -547,27 +548,27 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       idInUse(1),
 			contains: "id used by member",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(nil, true)
+				pool.EXPECT().Get(ctx, gomock.Any()).Return(nil, true)
 				n.pool = pool
 			},
 		},
 		{
 			fn:       idInUse(1),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(nil, false)
+				pool.EXPECT().Get(ctx, gomock.Any()).Return(nil, false)
 				n.pool = pool
 			},
 		},
 		{
 			fn:       leader(1),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil)
@@ -577,7 +578,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       leader(0),
 			contains: "is the leader",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil)
@@ -587,7 +588,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       notLeader(),
 			contains: ErrNotLeader.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{
@@ -601,7 +602,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       notLeader(),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil).MaxTimes(2)
@@ -611,7 +612,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       addressInUse(1, "addr"),
 			contains: "address used by member",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				mem := membershipmock.NewMockMember(ctrl)
@@ -624,7 +625,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       addressInUse(0, ""),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				pool.EXPECT().Members().Return([]membership.Member{})
@@ -634,11 +635,11 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       memberRemoved(0),
 			contains: "removed",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				mem := membershipmock.NewMockMember(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(mem, true)
+				pool.EXPECT().Get(ctx, gomock.Any()).Return(mem, true)
 				mem.EXPECT().Type().Return(RemovedMember)
 				n.pool = pool
 			},
@@ -646,37 +647,37 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       memberRemoved(0),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(nil, false)
+				pool.EXPECT().Get(ctx, gomock.Any()).Return(nil, false)
 				n.pool = pool
 			},
 		},
 		{
 			fn:       notMember(0),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(nil, true)
+				pool.EXPECT().Get(ctx, gomock.Any()).Return(nil, true)
 				n.pool = pool
 			},
 		},
 		{
 			fn:       notMember(0),
 			contains: "unknown member",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
-				pool.EXPECT().Get(gomock.Any()).Return(nil, false)
+				pool.EXPECT().Get(ctx, gomock.Any()).Return(nil, false)
 				n.pool = pool
 			},
 		},
 		{
 			fn:       available(),
 			contains: " quorum lost",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				m1 := membershipmock.NewMockMember(ctrl)
@@ -692,7 +693,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       available(),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				pool := membershipmock.NewMockPool(ctrl)
 				m1 := membershipmock.NewMockMember(ctrl)
@@ -705,7 +706,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       joined(),
 			contains: "not yet part of a raft",
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{}, nil)
@@ -715,7 +716,7 @@ func TestPreConditions(t *testing.T) {
 		{
 			fn:       joined(),
 			contains: nilErr.Error(),
-			expect: func(n *Node) {
+			expect: func(ctx context.Context, n *Node) {
 				ctrl := gomock.NewController(t)
 				eng := raftenginemock.NewMockEngine(ctrl)
 				eng.EXPECT().Status().Return(raft.Status{
@@ -730,8 +731,8 @@ func TestPreConditions(t *testing.T) {
 
 	for _, tt := range table {
 		n := new(Node)
-		tt.expect(n)
-		err := tt.fn(n)
+		tt.expect(context.Background(), n)
+		err := tt.fn(context.Background(), n)
 		if err == nil {
 			err = nilErr
 		}
@@ -762,7 +763,7 @@ func testConfChange(t *testing.T, fn func(*RawMember, *Node)) {
 		})
 	eng.EXPECT().Status().Return(raft.Status{}, nil)
 	m1.EXPECT().Raw().Return(RawMember{})
-	pool.EXPECT().Get(gomock.Any()).Return(m1, true)
+	pool.EXPECT().Get(context.Background(), gomock.Any()).Return(m1, true)
 
 	n := new(Node)
 	n.engine = eng
@@ -771,6 +772,6 @@ func testConfChange(t *testing.T, fn func(*RawMember, *Node)) {
 	fn(raw, n)
 }
 
-func testPreCond(fns ...func(c *Node) error) error {
+func testPreCond(ctx context.Context, fns ...func(ctx context.Context, c *Node) error) error {
 	return nil
 }

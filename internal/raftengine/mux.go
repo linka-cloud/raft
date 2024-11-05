@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
+	"go.etcd.io/raft/v3"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 const (
@@ -257,6 +258,12 @@ func (m *mux) proposeConfChange(ctx context.Context, gid uint64, cc etcdraftpb.C
 	})
 }
 
+func (m *mux) forgetLeader(ctx context.Context, gid uint64) error {
+	return m.call(ctx, gid, func(rn *raft.RawNode) error {
+		return rn.ForgetLeader()
+	})
+}
+
 func (m *mux) step(ctx context.Context, gid uint64, msg etcdraftpb.Message) error {
 	switch msg.Type {
 	case etcdraftpb.MsgHeartbeat, etcdraftpb.MsgHeartbeatResp:
@@ -349,6 +356,10 @@ func (m *muxNode) Propose(ctx context.Context, data []byte) error {
 
 func (m *muxNode) ProposeConfChange(ctx context.Context, cc etcdraftpb.ConfChangeI) error {
 	return m.mux.proposeConfChange(ctx, m.gid, cc)
+}
+
+func (m *muxNode) ForgetLeader(ctx context.Context) error {
+	return m.mux.forgetLeader(ctx, m.gid)
 }
 
 func (m *muxNode) Step(ctx context.Context, msg etcdraftpb.Message) error {

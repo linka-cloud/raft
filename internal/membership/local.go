@@ -5,9 +5,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/raftlog"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 func newLocal(cfg Config, m raftpb.Member) (Member, error) {

@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/trace"
+
+	"go.etcd.io/etcd/client/pkg/v3/fileutil"
+	"go.etcd.io/raft/v3"
+	"go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/storage"
+	"github.com/shaj13/raft/internal/storage/disk/wal"
+	"github.com/shaj13/raft/internal/storage/raftwal"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/client/pkg/v3/fileutil"
-	"go.etcd.io/etcd/raft/v3/raftpb"
-	"go.etcd.io/etcd/server/v3/wal"
-	"go.etcd.io/etcd/server/v3/wal/walpb"
 )
 
 var _ storage.Storage = &disk{}
@@ -20,7 +23,6 @@ var _ storage.Storage = &disk{}
 type Config interface {
 	StateDir() string
 	MaxSnapshotFiles() int
-	Context() context.Context
 	Logger() raftlog.Logger
 }
 
@@ -41,7 +43,8 @@ func New(cfg Config) storage.Storage {
 
 // disk implements storage.Storage
 type disk struct {
-	wal      *wal.WAL
+	*raftwal.DiskStorage
+	cache    *raft.MemoryStorage
 	shoter   *snapshotter
 	logger   raftlog.Logger
 	maxsnaps int
@@ -130,39 +133,43 @@ func (d *disk) purge() {
 // SaveSnapshot saves a given snapshot into the WAL.
 // The raw snapshot must be saved into disk during the,
 // network transportation.
-func (d *disk) SaveSnapshot(snap raftpb.Snapshot) error {
+func (d *disk) SaveSnapshot(ctx context.Context, snap *raftpb.Snapshot) error {
+	ctx, tr := trace.NewTask(ctx, "raft.disk.saveSnapshot")
+	defer tr.End()
+
 	defer d.purge()
 
-	walSnap := walpb.Snapshot{
-		Index:     snap.Metadata.Index,
-		Term:      snap.Metadata.Term,
-		ConfState: &snap.Metadata.ConfState,
-	}
+	// walSnap := walpb.Snapshot{
+	// 	Index:     snap.Metadata.Index,
+	// 	Term:      snap.Metadata.Term,
+	// 	ConfState: &snap.Metadata.ConfState,
+	// }
 
-	if err := d.wal.SaveSnapshot(walSnap); err != nil {
+	if err := d.DiskStorage.SaveSnapshot(ctx, snap); err != nil {
 		return err
 	}
 
-	// Force WAL to fsync its hard state before ReleaseLockTo() releases
-	// old data from the WAL. Otherwise could get an error like:
-	// panic: tocommit(107) is out of range [lastIndex(84)]. Was the raft log corrupted, truncated, or lost?
-	if err := d.wal.Sync(); err != nil {
-		return err
-	}
-
-	return d.wal.ReleaseLockTo(snap.Metadata.Index)
+	// return d.wal.ReleaseLockTo(snap.Metadata.Index)
+	return nil
 }
 
 // SaveEntries saves a given entries into the WAL.
-func (d *disk) SaveEntries(st raftpb.HardState, ents []raftpb.Entry) error {
-	return d.wal.Save(st, ents)
+func (d *disk) SaveEntries(ctx context.Context, st *raftpb.HardState, ents []raftpb.Entry) error {
+	ctx, tr := trace.NewTask(ctx, "raft.disk.saveEntries")
+	defer tr.End()
+
+	return d.DiskStorage.SaveEntries(ctx, st, ents)
 }
 
 // Boot return wal metadata, hard-state, entries, and newest snapshot,
 // Otherwise, it create new wal from given metadata alongside snapshots dir.
-func (d *disk) Boot(meta []byte) ([]byte, raftpb.HardState, []raftpb.Entry, *storage.Snapshot, error) {
-	fail := func(err error) ([]byte, raftpb.HardState, []raftpb.Entry, *storage.Snapshot, error) {
-		return []byte{}, raftpb.HardState{}, []raftpb.Entry{}, nil, err
+func (d *disk) Boot(meta []byte) ([]byte, *raftpb.HardState, []raftpb.Entry, *storage.Snapshot, error) {
+	fail := func(err error) ([]byte, *raftpb.HardState, []raftpb.Entry, *storage.Snapshot, error) {
+		return []byte{}, nil, []raftpb.Entry{}, nil, err
+	}
+
+	if len(meta) >= 512 {
+		return fail(fmt.Errorf("raft/storage: metadata exceeds 512 bytes"))
 	}
 
 	if !fileutil.Exist(d.snapdir) {
@@ -180,55 +187,57 @@ func (d *disk) Boot(meta []byte) ([]byte, raftpb.HardState, []raftpb.Entry, *sto
 			)
 		}
 
-		w, err := wal.Create(nil, d.waldir, meta)
-		if err != nil {
-			return fail(
-				fmt.Errorf("raft/storage: create WAL file: %v", err),
-			)
-		}
+		// w, err := wal.Create(nil, d.waldir, meta)
+		// if err != nil {
+		// 	return fail(
+		// 		fmt.Errorf("raft/storage: create WAL file: %v", err),
+		// 	)
+		// }
 
-		d.wal = w
-		return meta, raftpb.HardState{}, []raftpb.Entry{}, nil, nil
+		d.DiskStorage = raftwal.Init(d.waldir)
+		d.DiskStorage.SetMeta(meta)
+		return meta, &raftpb.HardState{}, []raftpb.Entry{}, nil, nil
 	}
 
-	walSnaps, err := wal.ValidSnapshotEntries(nil, d.waldir)
+	// walSnaps, err := wal.ValidSnapshotEntries(nil, d.waldir)
+	//
+	// if err != nil {
+	// 	return fail(
+	// 		fmt.Errorf("raft/storage: list WAL snapshots: %v", err),
+	// 	)
+	// }
+	//
+	// sf, err := decodeNewestAvailableSnapshot(d.snapdir, walSnaps)
+	// if err == errNoSnapshot {
+	// 	sf = new(storage.Snapshot)
+	// } else if err != nil {
+	// 	return fail(
+	// 		fmt.Errorf("raft/storage: load newest snapshot: %v", err),
+	// 	)
+	// }
+	//
+	// walsnap := walpb.Snapshot{
+	// 	Index: sf.Raw.Metadata.Index,
+	// 	Term:  sf.Raw.Metadata.Term,
+	// }
+	//
+	// w, err := wal.Open(nil, d.waldir, walsnap)
+	// if err != nil {
+	// 	return fail(
+	// 		fmt.Errorf("raft/storage: open WAL: %v", err),
+	// 	)
+	// }
+	// meta, st, ents, err := w.ReadAll()
+	//
+	// if err != nil {
+	// 	return fail(
+	// 		fmt.Errorf("raft/storage: read WAL: %v", err),
+	// 	)
+	// }
 
-	if err != nil {
-		return fail(
-			fmt.Errorf("raft/storage: list WAL snapshots: %v", err),
-		)
-	}
-
-	sf, err := decodeNewestAvailableSnapshot(d.snapdir, walSnaps)
-	if err == errNoSnapshot {
-		sf = new(storage.Snapshot)
-	} else if err != nil {
-		return fail(
-			fmt.Errorf("raft/storage: load newest snapshot: %v", err),
-		)
-	}
-
-	walsnap := walpb.Snapshot{
-		Index: sf.Raw.Metadata.Index,
-		Term:  sf.Raw.Metadata.Term,
-	}
-
-	w, err := wal.Open(nil, d.waldir, walsnap)
-	if err != nil {
-		return fail(
-			fmt.Errorf("raft/storage: open WAL: %v", err),
-		)
-	}
-	meta, st, ents, err := w.ReadAll()
-
-	if err != nil {
-		return fail(
-			fmt.Errorf("raft/storage: read WAL: %v", err),
-		)
-	}
-
-	d.wal = w
-	return meta, st, ents, sf, nil
+	d.DiskStorage = raftwal.Init(d.waldir)
+	return d.DiskStorage.Boot(meta)
+	// return meta, &st, ents, sf, nil
 }
 
 func (d *disk) Exist() bool {
@@ -240,5 +249,5 @@ func (d *disk) Snapshotter() storage.Snapshotter {
 }
 
 func (d *disk) Close() error {
-	return d.wal.Close()
+	return d.DiskStorage.Close()
 }

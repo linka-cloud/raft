@@ -1,11 +1,10 @@
 package raft
 
 import (
-	"context"
 	"os"
 	"time"
 
-	"go.etcd.io/etcd/raft/v3"
+	"go.etcd.io/raft/v3"
 
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftengine"
@@ -280,18 +279,6 @@ func WithDisableProposalForwarding() Option {
 	})
 }
 
-// WithContext set raft node parent ctx, The provided ctx must be non-nil.
-//
-// The context controls the entire lifetime of the raft node:
-// obtaining a connection, sending the msgs, reading the response, and process msgs.
-//
-// Default Value: context.Background().
-func WithContext(ctx context.Context) Option {
-	return optionFunc(func(c *config) {
-		c.ctx = ctx
-	})
-}
-
 // WithLogger sets logger that is used to generates lines of output.
 //
 // Default Value: raftlog.DefaultLogger.
@@ -438,7 +425,6 @@ func (c *startConfig) apply(opts ...StartOption) {
 }
 
 type config struct {
-	ctx              context.Context
 	rcfg             *raft.Config
 	tickInterval     time.Duration
 	streamTimeOut    time.Duration
@@ -448,23 +434,20 @@ type config struct {
 	snapInterval     uint64
 	groupID          uint64
 	controller       transport.Controller
-	storage          storage.Storage
-	pool             membership.Pool
-	dial             transport.Dial
-	engine           raftengine.Engine
-	mux              raftengine.Mux
-	fsm              StateMachine
-	logger           raftlog.Logger
-	pipelining       bool
-	stateChangeCh    chan raft.StateType
+	// storage       *raftwal.DiskStorage
+	storage       storage.Storage
+	pool          membership.Pool
+	dial          transport.Dial
+	engine        raftengine.Engine
+	mux           raftengine.Mux
+	fsm           StateMachine
+	logger        raftlog.Logger
+	pipelining    bool
+	stateChangeCh chan raft.StateType
 }
 
 func (c *config) Logger() raftlog.Logger {
 	return c.logger
-}
-
-func (c *config) Context() context.Context {
-	return c.ctx
 }
 
 func (c *config) GroupID() uint64 {
@@ -483,9 +466,9 @@ func (c *config) DrainTimeout() time.Duration {
 	return c.drainTimeOut
 }
 
-func (c *config) Snapshotter() storage.Snapshotter {
-	return c.storage.Snapshotter()
-}
+// func (c *config) Snapshotter() storage.Snapshotter {
+// 	return c.storage.Snapshotter()
+// }
 
 func (c *config) StateDir() string {
 	return c.statedir
@@ -499,10 +482,13 @@ func (c *config) Controller() transport.Controller {
 	return c.controller
 }
 
+// func (c *config) Storage() *raftwal.DiskStorage {
+// 	return c.storage
+// }
+
 func (c *config) Storage() storage.Storage {
 	return c.storage
 }
-
 func (c *config) SnapInterval() uint64 {
 	return c.snapInterval
 }
@@ -547,8 +533,8 @@ func newConfig(opts ...Option) *config {
 			MaxSizePerMsg:             1024 * 1024,
 			MaxInflightMsgs:           256,
 			MaxUncommittedEntriesSize: 1 << 30,
+			// AsyncStorageWrites:        true,
 		},
-		ctx:              context.Background(),
 		tickInterval:     time.Millisecond * 100,
 		streamTimeOut:    time.Second * 10,
 		drainTimeOut:     time.Second * 10,

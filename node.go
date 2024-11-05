@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime/trace"
 	"time"
 
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
 
 	"github.com/shaj13/raft/internal/membership"
 	"github.com/shaj13/raft/internal/raftengine"
@@ -46,6 +47,7 @@ func NewNode(fsm StateMachine, proto etransport.Proto, opts ...Option) *Node {
 	cfg := newConfig(opts...)
 	cfg.fsm = fsm
 	cfg.controller = ctrl
+	// cfg.storage = raftwal.Init(cfg.StateDir())
 	cfg.storage = disk.New(cfg)
 	cfg.dial = dialer(cfg)
 	cfg.pool = membership.New(cfg)
@@ -179,7 +181,7 @@ type Node struct {
 	engine  raftengine.Engine
 	cfg     *config
 	// exec pre conditions, its used by tests.
-	exec func(fns ...func(c *Node) error) error
+	exec func(ctx context.Context, fns ...func(ctx context.Context, c *Node) error) error
 }
 
 // Shutdown gracefully shuts down the node without interrupting any
@@ -209,6 +211,7 @@ func (n *Node) Handler() etransport.Handler {
 // or the value of a later write.
 func (n *Node) LinearizableRead(ctx context.Context) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		noLeader(),
 		available(),
@@ -225,8 +228,9 @@ func (n *Node) LinearizableRead(ctx context.Context) error {
 // that can be used to to read snapshot file.
 // the caller must invoke close method on the returned io.ReadCloser explicitly,
 // Otherwise, the underlying os.File remain open.
-func (n *Node) Snapshot() (io.ReadCloser, error) {
+func (n *Node) Snapshot(ctx context.Context) (io.ReadCloser, error) {
 	err := n.preCond(
+		ctx,
 		joined(),
 	)
 
@@ -234,18 +238,20 @@ func (n *Node) Snapshot() (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	snap, err := n.engine.CreateSnapshot()
-	if err != nil {
-		return nil, err
-	}
-
-	meta := snap.Metadata
-	return n.storage.Snapshotter().Reader(meta.Term, meta.Index)
+	// snap, err := n.engine.CreateSnapshot()
+	// if err != nil {
+	// 	return nil, err
+	// }
+	//
+	// meta := snap.Metadata
+	// return n.storage.Snapshotter().Reader(meta.Term, meta.Index)
+	return nil, errors.New("unimplemented")
 }
 
 // TransferLeadership proposes to transfer leadership to the given member id.
 func (n *Node) TransferLeadership(ctx context.Context, id uint64) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		notMember(id),
 		memberRemoved(id),
@@ -266,6 +272,7 @@ func (n *Node) TransferLeadership(ctx context.Context, id uint64) error {
 // This must be run on the leader or it will fail.
 func (n *Node) Stepdown(ctx context.Context) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		notLeader(),
 		available(),
@@ -302,10 +309,10 @@ func (n *Node) Stepdown(ctx context.Context) error {
 // It can be called after Stop to restart the node.
 //
 // Start always returns a non-nil error. After Shutdown, the returned error is ErrNodeStopped.
-func (n *Node) Start(opts ...StartOption) error {
+func (n *Node) Start(ctx context.Context, opts ...StartOption) error {
 	cfg := new(startConfig)
 	cfg.apply(opts...)
-	return n.engine.Start(cfg.addr, cfg.operators...)
+	return n.engine.Start(ctx, cfg.addr, cfg.operators...)
 }
 
 // Leave proposes to remove current effective member.
@@ -323,7 +330,11 @@ func (n *Node) Leave(ctx context.Context) error {
 // Replicate returns the context's error, otherwise it returns any
 // error returned due to the replication.
 func (n *Node) Replicate(ctx context.Context, data []byte) error {
+	ctx, tr := trace.NewTask(ctx, "raft.node.replicate")
+	defer tr.End()
+
 	err := n.preCond(
+		ctx,
 		joined(),
 		noLeader(),
 		notType(n.Whoami(), VoterMember),
@@ -350,6 +361,7 @@ func (n *Node) Replicate(ctx context.Context, data []byte) error {
 // Note: the member id and type are not updatable.
 func (n *Node) UpdateMember(ctx context.Context, raw *RawMember) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		notMember(raw.ID),
 		memberRemoved(raw.ID),
@@ -364,7 +376,7 @@ func (n *Node) UpdateMember(ctx context.Context, raw *RawMember) error {
 		return err
 	}
 
-	mem, _ := n.GetMemebr(raw.ID)
+	mem, _ := n.GetMember(ctx, raw.ID)
 	raw.Type = mem.Type()
 
 	return n.engine.ProposeConfChange(ctx, raw, etcdraftpb.ConfChangeUpdateNode)
@@ -384,6 +396,7 @@ func (n *Node) UpdateMember(ctx context.Context, raw *RawMember) error {
 // error returned due to the removal.
 func (n *Node) RemoveMember(ctx context.Context, id uint64) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		notMember(id),
 		memberRemoved(id),
@@ -398,7 +411,7 @@ func (n *Node) RemoveMember(ctx context.Context, id uint64) error {
 		return err
 	}
 
-	mem, _ := n.GetMemebr(id)
+	mem, _ := n.GetMember(ctx, id)
 	raw := mem.Raw()
 	raw.Type = raftpb.RemovedMember
 
@@ -419,6 +432,7 @@ func (n *Node) RemoveMember(ctx context.Context, id uint64) error {
 // If the provided member id is None, AddMember will assign next available id.
 func (n *Node) AddMember(ctx context.Context, raw *RawMember) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		idInUse(raw.ID),
 		addressInUse(raw.ID, raw.Address),
@@ -433,7 +447,7 @@ func (n *Node) AddMember(ctx context.Context, raw *RawMember) error {
 	}
 
 	if raw.ID == None {
-		raw.ID = n.pool.NextID()
+		raw.ID = n.pool.NextID(ctx)
 	}
 
 	cct := etcdraftpb.ConfChangeAddNode
@@ -466,6 +480,7 @@ func (n *Node) PromoteMember(ctx context.Context, id uint64) error {
 // error returned due to the demotion.
 func (n *Node) DemoteMember(ctx context.Context, id uint64) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		notMember(id),
 		memberRemoved(id),
@@ -481,17 +496,17 @@ func (n *Node) DemoteMember(ctx context.Context, id uint64) error {
 		return err
 	}
 
-	mem, _ := n.GetMemebr(id)
+	mem, _ := n.GetMember(ctx, id)
 	raw := mem.Raw()
 	(&raw).Type = LearnerMember
 
 	return n.engine.ProposeConfChange(ctx, &raw, etcdraftpb.ConfChangeAddLearnerNode)
 }
 
-// GetMemebr returns member associated to the given id if exist,
+// GetMember returns member associated to the given id if exist,
 // Otherwise, it return nil and false.
-func (n *Node) GetMemebr(id uint64) (Member, bool) {
-	return n.pool.Get(id)
+func (n *Node) GetMember(ctx context.Context, id uint64) (Member, bool) {
+	return n.pool.Get(ctx, id)
 }
 
 // Members returns the list of raft Members in the Cluster.
@@ -523,13 +538,13 @@ func (n *Node) members(cond func(m Member) bool) []Member {
 	return mems
 }
 
-func (n *Node) preCond(fns ...func(c *Node) error) error {
+func (n *Node) preCond(ctx context.Context, fns ...func(ctx context.Context, c *Node) error) error {
 	if n.exec != nil {
-		return n.exec(fns...)
+		return n.exec(ctx, fns...)
 	}
 
 	for _, fn := range fns {
-		if err := fn(n); err != nil {
+		if err := fn(ctx, n); err != nil {
 			return err
 		}
 	}
@@ -538,6 +553,7 @@ func (n *Node) preCond(fns ...func(c *Node) error) error {
 
 func (n *Node) promoteMember(ctx context.Context, id uint64, forwarded bool) error {
 	err := n.preCond(
+		ctx,
 		joined(),
 		notMember(id),
 		noLeader(),
@@ -562,11 +578,11 @@ func (n *Node) promoteMember(ctx context.Context, id uint64, forwarded bool) err
 		return raftengine.ErrNoLeader
 	}
 
-	mem, _ := n.GetMemebr(id)
+	mem, _ := n.GetMember(ctx, id)
 	raw := mem.Raw()
 
 	if rs.Progress == nil {
-		lmem, ok := n.GetMemebr(rs.Lead)
+		lmem, ok := n.GetMember(ctx, rs.Lead)
 		// leader lost, because rs.Lead = None.
 		if !ok {
 			return raftengine.ErrNoLeader
@@ -593,8 +609,8 @@ func (n *Node) promoteMember(ctx context.Context, id uint64, forwarded bool) err
 	return n.engine.ProposeConfChange(ctx, &raw, etcdraftpb.ConfChangeAddNode)
 }
 
-func joined() func(c *Node) error {
-	return func(c *Node) error {
+func joined() func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		if c.Whoami() == None {
 			return fmt.Errorf("raft: node is not yet part of a raft cluster")
 		}
@@ -602,8 +618,8 @@ func joined() func(c *Node) error {
 	}
 }
 
-func available() func(c *Node) error {
-	return func(c *Node) error {
+func available() func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		reachables := c.members(func(m Member) bool {
 			return m.IsActive() && m.Type() == VoterMember
 		})
@@ -619,18 +635,18 @@ func available() func(c *Node) error {
 	}
 }
 
-func notMember(id uint64) func(c *Node) error {
-	return func(c *Node) error {
-		if _, ok := c.GetMemebr(id); !ok {
+func notMember(id uint64) func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
+		if _, ok := c.GetMember(ctx, id); !ok {
 			return fmt.Errorf("raft: unknown member %x", id)
 		}
 		return nil
 	}
 }
 
-func memberRemoved(id uint64) func(c *Node) error {
-	return func(c *Node) error {
-		m, ok := c.GetMemebr(id)
+func memberRemoved(id uint64) func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
+		m, ok := c.GetMember(ctx, id)
 		if ok && m.Type() == RemovedMember {
 			return fmt.Errorf("raft: member %x removed", id)
 		}
@@ -638,8 +654,8 @@ func memberRemoved(id uint64) func(c *Node) error {
 	}
 }
 
-func addressInUse(mid uint64, addr string) func(c *Node) error {
-	return func(c *Node) error {
+func addressInUse(mid uint64, addr string) func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		membs := c.members(func(m Member) bool {
 			return m.Address() == addr && m.ID() != mid
 		})
@@ -651,8 +667,8 @@ func addressInUse(mid uint64, addr string) func(c *Node) error {
 	}
 }
 
-func notLeader() func(c *Node) error {
-	return func(c *Node) error {
+func notLeader() func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		if c.Whoami() != c.Leader() {
 			return ErrNotLeader
 		}
@@ -660,8 +676,8 @@ func notLeader() func(c *Node) error {
 	}
 }
 
-func leader(id uint64) func(c *Node) error {
-	return func(c *Node) error {
+func leader(id uint64) func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		if id == c.Leader() {
 			return fmt.Errorf("raft: operation not permitted, member %x is the leader, transfer leadership first", id)
 		}
@@ -669,17 +685,17 @@ func leader(id uint64) func(c *Node) error {
 	}
 }
 
-func idInUse(id uint64) func(c *Node) error {
-	return func(c *Node) error {
-		if _, ok := c.GetMemebr(id); ok {
+func idInUse(id uint64) func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
+		if _, ok := c.GetMember(ctx, id); ok {
 			return fmt.Errorf("raft: id used by member %x", id)
 		}
 		return nil
 	}
 }
 
-func noLeader() func(c *Node) error {
-	return func(c *Node) error {
+func noLeader() func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		if c.Leader() == None {
 			return raftengine.ErrNoLeader
 		}
@@ -687,8 +703,8 @@ func noLeader() func(c *Node) error {
 	}
 }
 
-func disableForwarding() func(c *Node) error {
-	return func(c *Node) error {
+func disableForwarding() func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
 		disable := c.cfg.rcfg.DisableProposalForwarding
 		if c.Leader() != c.Whoami() && disable {
 			return ErrNotLeader
@@ -697,9 +713,9 @@ func disableForwarding() func(c *Node) error {
 	}
 }
 
-func notType(id uint64, t MemberType) func(c *Node) error {
-	return func(c *Node) error {
-		mem, _ := c.GetMemebr(id)
+func notType(id uint64, t MemberType) func(ctx context.Context, c *Node) error {
+	return func(ctx context.Context, c *Node) error {
+		mem, _ := c.GetMember(ctx, id)
 		if mt := mem.Type(); mt != t {
 			return fmt.Errorf("raft: memebr (%x) is a %s not a %s", id, mt, t)
 		}

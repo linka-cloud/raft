@@ -4,9 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/stretchr/testify/require"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	etcdraftpb "go.etcd.io/raft/v3/raftpb"
+
+	"github.com/shaj13/raft/internal/raftpb"
 )
 
 func TestRemoved(t *testing.T) {
