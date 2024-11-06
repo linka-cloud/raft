@@ -4,15 +4,16 @@ import (
 	"context"
 	"time"
 
+	"go.etcd.io/etcd/raft/v3"
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/transport"
 	"github.com/shaj13/raft/raftlog"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
-//go:generate mockgen -package membershipmock  -source internal/membership/types.go -destination internal/mocks/membership/membership.go
-//go:generate mockgen -package membership  -source internal/membership/types.go -destination internal/membership/types_test.go
+//go:generate mockgen -package membershipmock  -source types.go -destination ../mocks/membership/membership.go
+//go:generate mockgen -package membership  -source types.go -destination types_test.go
 
 // Member represents a raft cluster member.
 type Member interface {

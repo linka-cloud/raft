@@ -35,8 +35,8 @@ var (
 	ErrFailedPrecondition = errors.New("raft: precondition failed")
 )
 
-//go:generate mockgen -package raftenginemock  -source internal/raftengine/engine.go -destination internal/mocks/raftengine/engine.go
-//go:generate mockgen -package raftengine  -source vendor/go.etcd.io/etcd/raft/v3/node.go -destination internal/raftengine/node_test.go
+//go:generate mockgen -package raftenginemock -source engine.go -destination ../mocks/raftengine/engine.go
+//go:generate mockgen -package raftengine -source ../../vendor/go.etcd.io/etcd/raft/v3/node.go -destination node_test.go
 
 // Engine represents the underlying raft node processor.
 type Engine interface {

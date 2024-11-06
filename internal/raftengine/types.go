@@ -16,7 +16,7 @@ import (
 	"github.com/shaj13/raft/raftlog"
 )
 
-//go:generate mockgen -package raftengine  -source internal/raftengine/types.go -destination internal/raftengine/types_test.go
+//go:generate mockgen -package raftengine  -source types.go -destination types_test.go
 
 // Operator is a bootstrapper func that determine the action that is to be performed or considered.
 type Operator interface {

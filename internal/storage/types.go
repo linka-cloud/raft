@@ -3,11 +3,12 @@ package storage
 import (
 	"io"
 
-	"github.com/shaj13/raft/internal/raftpb"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+
+	"github.com/shaj13/raft/internal/raftpb"
 )
 
-//go:generate mockgen -package storagemock -source internal/storage/types.go -destination internal/mocks/storage/storage.go
+//go:generate mockgen -package storagemock -source types.go -destination ../mocks/storage/storage.go
 
 // Snapshot is the state of a system at a particular point in time.
 type Snapshot struct {

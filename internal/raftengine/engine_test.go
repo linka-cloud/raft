@@ -8,6 +8,13 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/pkg/v3/idutil"
+	"go.etcd.io/etcd/pkg/v3/pbutil"
+	"go.etcd.io/etcd/raft/v3"
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/etcd/raft/v3/tracker"
+
 	"github.com/shaj13/raft/internal/atomic"
 	"github.com/shaj13/raft/internal/membership"
 	membershipmock "github.com/shaj13/raft/internal/mocks/membership"
@@ -16,12 +23,6 @@ import (
 	"github.com/shaj13/raft/internal/raftpb"
 	"github.com/shaj13/raft/internal/storage"
 	"github.com/shaj13/raft/raftlog"
-	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/pkg/v3/idutil"
-	"go.etcd.io/etcd/pkg/v3/pbutil"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
-	"go.etcd.io/etcd/raft/v3/tracker"
 )
 
 func TestNew(t *testing.T) {
@@ -32,6 +33,7 @@ func TestNew(t *testing.T) {
 	cfg.EXPECT().Pool()
 	cfg.EXPECT().StateMachine()
 	cfg.EXPECT().Logger()
+	cfg.EXPECT().StateChangeCh()
 
 	eng := New(cfg)
 	require.NotNil(t, eng)
@@ -432,6 +434,7 @@ func TestLocalCreateSnapshot(t *testing.T) {
 		appliedIndex: atomic.NewUint64(),
 		snapIndex:    atomic.NewUint64(),
 		cache:        raft.NewMemoryStorage(),
+		snapshoting:  atomic.NewBool(),
 	}
 
 	eng.started.Set()
@@ -464,6 +467,7 @@ func TestLocalCreateSnapshot(t *testing.T) {
 	eng.cache.Append([]etcdraftpb.Entry{{Index: 1}})
 	err = eng.createSnapshot()
 	require.NoError(t, err)
+	eng.wg.Wait()
 	require.Equal(t, uint64(1), eng.snapIndex.Get())
 }
 
@@ -825,6 +829,7 @@ func TestForceSnapshot(t *testing.T) {
 		appliedIndex: atomic.NewUint64(),
 		snapIndex:    atomic.NewUint64(),
 		logger:       raftlog.DefaultLogger,
+		snapshoting:  atomic.NewBool(),
 	}
 
 	// round #1 it should return false when msg not snapshot.
