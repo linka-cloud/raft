@@ -6,10 +6,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/shaj13/raft"
-	"github.com/shaj13/raft/transport"
-	"github.com/shaj13/raft/transport/raftgrpc"
-	"github.com/shaj13/raft/transport/rafthttp"
+	"go.linka.cloud/raft"
+	"go.linka.cloud/raft/transport"
+	"go.linka.cloud/raft/transport/raftgrpc"
+	"go.linka.cloud/raft/transport/rafthttp"
 )
 
 type stateMachine struct{}

@@ -11,10 +11,10 @@ import (
 	time "time"
 
 	gomock "github.com/golang/mock/gomock"
-	membership "github.com/shaj13/raft/internal/membership"
-	storage "github.com/shaj13/raft/internal/storage"
-	transport "github.com/shaj13/raft/internal/transport"
-	raftlog "github.com/shaj13/raft/raftlog"
+	membership "go.linka.cloud/raft/internal/membership"
+	storage "go.linka.cloud/raft/internal/storage"
+	transport "go.linka.cloud/raft/internal/transport"
+	raftlog "go.linka.cloud/raft/raftlog"
 	v3 "go.etcd.io/etcd/raft/v3"
 )
 

@@ -15,14 +15,14 @@ import (
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/raft/v3/tracker"
 
-	"github.com/shaj13/raft/internal/atomic"
-	"github.com/shaj13/raft/internal/membership"
-	membershipmock "github.com/shaj13/raft/internal/mocks/membership"
-	storagemock "github.com/shaj13/raft/internal/mocks/storage"
-	"github.com/shaj13/raft/internal/msgbus"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
-	"github.com/shaj13/raft/raftlog"
+	"go.linka.cloud/raft/internal/atomic"
+	"go.linka.cloud/raft/internal/membership"
+	membershipmock "go.linka.cloud/raft/internal/mocks/membership"
+	storagemock "go.linka.cloud/raft/internal/mocks/storage"
+	"go.linka.cloud/raft/internal/msgbus"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/storage"
+	"go.linka.cloud/raft/raftlog"
 )
 
 func TestNew(t *testing.T) {

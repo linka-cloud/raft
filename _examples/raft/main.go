@@ -18,9 +18,9 @@ import (
 	"github.com/gorilla/mux"
 	"google.golang.org/grpc"
 
-	"github.com/shaj13/raft"
-	"github.com/shaj13/raft/transport"
-	"github.com/shaj13/raft/transport/raftgrpc"
+	"go.linka.cloud/raft"
+	"go.linka.cloud/raft/transport"
+	"go.linka.cloud/raft/transport/raftgrpc"
 )
 
 var (

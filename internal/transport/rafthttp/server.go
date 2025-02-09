@@ -9,9 +9,9 @@ import (
 	"go.etcd.io/etcd/pkg/v3/pbutil"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/transport"
-	"github.com/shaj13/raft/raftlog"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/transport"
+	"go.linka.cloud/raft/raftlog"
 )
 
 // NewHandlerFunc retur'ns func that create an http transport handler.

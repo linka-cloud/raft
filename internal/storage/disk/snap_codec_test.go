@@ -11,8 +11,8 @@ import (
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/server/v3/wal/walpb"
 
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/storage"
 )
 
 func TestSnapshotCodec(t *testing.T) {

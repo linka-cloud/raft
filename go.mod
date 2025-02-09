@@ -1,4 +1,4 @@
-module github.com/shaj13/raft
+module go.linka.cloud/raft
 
 go 1.21
 

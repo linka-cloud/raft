@@ -12,12 +12,12 @@ import (
 	"go.etcd.io/etcd/raft/v3"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
-	"github.com/shaj13/raft/internal/atomic"
-	"github.com/shaj13/raft/internal/membership"
-	"github.com/shaj13/raft/internal/msgbus"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
-	"github.com/shaj13/raft/raftlog"
+	"go.linka.cloud/raft/internal/atomic"
+	"go.linka.cloud/raft/internal/membership"
+	"go.linka.cloud/raft/internal/msgbus"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/storage"
+	"go.linka.cloud/raft/raftlog"
 )
 
 var (

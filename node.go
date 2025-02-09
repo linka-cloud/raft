@@ -10,13 +10,13 @@ import (
 
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
-	"github.com/shaj13/raft/internal/membership"
-	"github.com/shaj13/raft/internal/raftengine"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
-	"github.com/shaj13/raft/internal/storage/disk"
-	"github.com/shaj13/raft/internal/transport"
-	etransport "github.com/shaj13/raft/transport"
+	"go.linka.cloud/raft/internal/membership"
+	"go.linka.cloud/raft/internal/raftengine"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/storage"
+	"go.linka.cloud/raft/internal/storage/disk"
+	"go.linka.cloud/raft/internal/transport"
+	etransport "go.linka.cloud/raft/transport"
 )
 
 var (

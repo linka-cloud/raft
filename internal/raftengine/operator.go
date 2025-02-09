@@ -13,8 +13,8 @@ import (
 	"go.etcd.io/etcd/raft/v3"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/storage"
 )
 
 // order define a weight to operators to obtain the execution order.

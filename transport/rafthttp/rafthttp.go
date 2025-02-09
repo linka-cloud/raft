@@ -5,10 +5,10 @@ import (
 	"context"
 	"net/http"
 
-	itransport "github.com/shaj13/raft/internal/transport"
-	"github.com/shaj13/raft/internal/transport/rafthttp"
-	"github.com/shaj13/raft/raftlog"
-	"github.com/shaj13/raft/transport"
+	itransport "go.linka.cloud/raft/internal/transport"
+	"go.linka.cloud/raft/internal/transport/rafthttp"
+	"go.linka.cloud/raft/raftlog"
+	"go.linka.cloud/raft/transport"
 )
 
 func init() {

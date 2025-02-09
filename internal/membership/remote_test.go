@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
-	transportmock "github.com/shaj13/raft/internal/mocks/transport"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/raftlog"
+	transportmock "go.linka.cloud/raft/internal/mocks/transport"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/raftlog"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/raft/v3"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"

@@ -5,7 +5,7 @@ import (
 
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
-	"github.com/shaj13/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/raftpb"
 )
 
 //go:generate mockgen -package storagemock -source types.go -destination ../mocks/storage/storage.go

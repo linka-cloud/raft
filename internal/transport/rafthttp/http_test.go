@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 
-	transportmock "github.com/shaj13/raft/internal/mocks/transport"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/raftlog"
+	transportmock "go.linka.cloud/raft/internal/mocks/transport"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/raftlog"
 )
 
 const testGroupID = uint64(1)

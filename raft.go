@@ -7,12 +7,12 @@ import (
 
 	"go.etcd.io/etcd/raft/v3"
 
-	"github.com/shaj13/raft/internal/membership"
-	"github.com/shaj13/raft/internal/raftengine"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/storage"
-	"github.com/shaj13/raft/internal/transport"
-	"github.com/shaj13/raft/raftlog"
+	"go.linka.cloud/raft/internal/membership"
+	"go.linka.cloud/raft/internal/raftengine"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/storage"
+	"go.linka.cloud/raft/internal/transport"
+	"go.linka.cloud/raft/raftlog"
 )
 
 // None is a placeholder node ID used to identify non-existence.

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shaj13/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/raftpb"
 	"github.com/stretchr/testify/require"
 	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
 )

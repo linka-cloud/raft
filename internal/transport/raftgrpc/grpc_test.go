@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
-	transportmock "github.com/shaj13/raft/internal/mocks/transport"
-	"github.com/shaj13/raft/internal/raftpb"
-	"github.com/shaj13/raft/internal/transport/raftgrpc/pb"
-	"github.com/shaj13/raft/raftlog"
+	transportmock "go.linka.cloud/raft/internal/mocks/transport"
+	"go.linka.cloud/raft/internal/raftpb"
+	"go.linka.cloud/raft/internal/transport/raftgrpc/pb"
+	"go.linka.cloud/raft/raftlog"
 )
 
 const testGroupID = uint64(1)

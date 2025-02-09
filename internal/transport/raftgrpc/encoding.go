@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/shaj13/raft/internal/transport/raftgrpc/pb"
+	"go.linka.cloud/raft/internal/transport/raftgrpc/pb"
 )
 
 func newEncoder(r io.Reader) *encoder {
