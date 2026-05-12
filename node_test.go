@@ -3,10 +3,17 @@ package raft
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/raft/v3"
+	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/etcd/raft/v3/tracker"
 	"go.linka.cloud/raft/internal/membership"
 	membershipmock "go.linka.cloud/raft/internal/mocks/membership"
 	raftenginemock "go.linka.cloud/raft/internal/mocks/raftengine"
@@ -14,10 +21,6 @@ import (
 	transportmock "go.linka.cloud/raft/internal/mocks/transport"
 	"go.linka.cloud/raft/internal/raftpb"
 	"go.linka.cloud/raft/internal/transport"
-	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/raft/v3"
-	etcdraftpb "go.etcd.io/etcd/raft/v3/raftpb"
-	"go.etcd.io/etcd/raft/v3/tracker"
 )
 
 func TestNodePreConditions(t *testing.T) {
@@ -159,9 +162,31 @@ func TestNodePreConditions(t *testing.T) {
 		require.Equal(t, len(tt.expected), len(got))
 
 		for i, fn := range got {
-			require.Equal(t, fmt.Sprintf("%p", tt.expected[i]), fmt.Sprintf("%p", fn))
+			require.Equal(t, preCondName(tt.expected[i]), preCondName(fn))
 		}
 	}
+}
+
+func preCondName(fn func(c *Node) error) string {
+	name := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+	for _, cond := range []string{
+		"joined",
+		"available",
+		"notMember",
+		"memberRemoved",
+		"addressInUse",
+		"notLeader",
+		"leader",
+		"idInUse",
+		"noLeader",
+		"disableForwarding",
+		"notType",
+	} {
+		if strings.Contains(name, "."+cond+".") {
+			return cond
+		}
+	}
+	return name
 }
 
 func TestNodePreCond(t *testing.T) {

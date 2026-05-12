@@ -149,7 +149,7 @@ func TestReportShutdown(t *testing.T) {
 		pool:      pool,
 		proposec:  make(chan etcdraftpb.Message),
 		msgc:      make(chan etcdraftpb.Message),
-		snapshotc: make(chan chan error),
+		snapshotc: make(chan chan snapshotJob),
 		cancel:    func() {},
 	}
 	eng.started.Set()
@@ -440,16 +440,20 @@ func TestLocalCreateSnapshot(t *testing.T) {
 	eng.started.Set()
 
 	// round #1 it refuse to create snap when indices are equaled.
-	err := eng.createSnapshot()
-	require.NoError(t, err)
+	job := eng.createSnapshot()
+	require.NoError(t, job.err)
+	res := <-job.done
+	require.NoError(t, res.err)
 
 	// round #2 it return err when fsm return err.
 	fsm := NewMockStateMachine(ctrl)
 	fsm.EXPECT().Snapshot().Return(nil, expectedErr)
 	eng.fsm = fsm
 	eng.appliedIndex.Set(1)
-	err = eng.createSnapshot()
-	require.Equal(t, expectedErr, err)
+	job = eng.createSnapshot()
+	require.NoError(t, job.err)
+	res = <-job.done
+	require.Equal(t, expectedErr, res.err)
 
 	// round #3 it return nil and create snap.
 	pool := membershipmock.NewMockPool(ctrl)
@@ -465,9 +469,10 @@ func TestLocalCreateSnapshot(t *testing.T) {
 	eng.storage = stg
 	eng.pool = pool
 	eng.cache.Append([]etcdraftpb.Entry{{Index: 1}})
-	err = eng.createSnapshot()
-	require.NoError(t, err)
-	eng.wg.Wait()
+	job = eng.createSnapshot()
+	require.NoError(t, job.err)
+	res = <-job.done
+	require.NoError(t, res.err)
 	require.Equal(t, uint64(1), eng.snapIndex.Get())
 }
 
@@ -797,7 +802,7 @@ func TestCreateSnapshot(t *testing.T) {
 		started:      atomic.NewBool(),
 		snapIndex:    atomic.NewUint64(),
 		appliedIndex: atomic.NewUint64(),
-		snapshotc:    make(chan chan error),
+		snapshotc:    make(chan chan snapshotJob),
 	}
 
 	_, err := eng.CreateSnapshot()
@@ -809,7 +814,7 @@ func TestCreateSnapshot(t *testing.T) {
 
 	go func() {
 		c := <-eng.snapshotc
-		c <- ErrNoLeader
+		c <- snapshotJob{err: ErrNoLeader}
 	}()
 
 	eng.appliedIndex.Set(10)
@@ -861,5 +866,6 @@ func TestForceSnapshot(t *testing.T) {
 	fsm.EXPECT().Snapshot().Return(nil, ErrNoLeader)
 	ok = eng.forceSnapshot(*msg)
 	require.True(t, ok)
+	eng.wg.Wait()
 	ctrl.Finish()
 }

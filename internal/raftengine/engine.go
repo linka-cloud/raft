@@ -98,10 +98,20 @@ type engine struct {
 	appliedIndex *atomic.Uint64
 	proposec     chan etcdraftpb.Message
 	msgc         chan etcdraftpb.Message
-	snapshotc    chan chan error
+	snapshotc    chan chan snapshotJob
 	confState    *etcdraftpb.ConfState
 	logger       raftlog.Logger
 	stateCh      chan raft.StateType
+}
+
+type snapshotJob struct {
+	done <-chan snapshotResult
+	err  error
+}
+
+type snapshotResult struct {
+	snap etcdraftpb.Snapshot
+	err  error
 }
 
 func (eng *engine) LinearizableRead(ctx context.Context) error {
@@ -365,13 +375,19 @@ func (eng *engine) CreateSnapshot() (etcdraftpb.Snapshot, error) {
 		return eng.cache.Snapshot()
 	}
 
-	c := make(chan error)
+	c := make(chan snapshotJob)
 	eng.snapshotc <- c
-	if err := <-c; err != nil {
-		return etcdraftpb.Snapshot{}, err
+	job := <-c
+	if job.err != nil {
+		return etcdraftpb.Snapshot{}, job.err
 	}
 
-	return eng.cache.Snapshot()
+	res := <-job.done
+	if res.err != nil {
+		return etcdraftpb.Snapshot{}, res.err
+	}
+
+	return res.snap, nil
 }
 
 // Start engine.
@@ -395,7 +411,7 @@ func (eng *engine) Start(addr string, oprs ...Operator) error {
 	eng.ctx, eng.cancel = context.WithCancel(eng.cfg.Context())
 	eng.proposec = make(chan etcdraftpb.Message, 4096)
 	eng.msgc = make(chan etcdraftpb.Message, 4096)
-	eng.snapshotc = make(chan chan error)
+	eng.snapshotc = make(chan chan snapshotJob)
 	eng.started.Set()
 
 	eng.process(eng.proposec)
@@ -456,11 +472,21 @@ func (eng *engine) notifyStateChange(state raft.StateType) {
 	if eng.stateCh == nil {
 		return
 	}
-	tm := time.NewTicker(time.Second)
+	tm := time.NewTimer(time.Second)
 	defer tm.Stop()
 	select {
 	case eng.stateCh <- state:
+		return
+	default:
+	}
+
+	select {
 	case <-eng.stateCh:
+	default:
+	}
+
+	select {
+	case eng.stateCh <- state:
 	case <-tm.C:
 	}
 }
@@ -768,8 +794,8 @@ func (eng *engine) forceSnapshot(msg etcdraftpb.Message) bool {
 	// report snapshot failure, to re-send the new snapshot.
 	defer eng.ReportSnapshot(msg.To, raft.SnapshotFailure)
 
-	if err := eng.createSnapshot(); err != nil {
-		eng.logger.Warningf("raft.engine: force new snapshot: %v", err)
+	if job := eng.createSnapshot(); job.err != nil {
+		eng.logger.Warningf("raft.engine: force new snapshot: %v", job.err)
 	}
 
 	return true
@@ -780,33 +806,84 @@ func (eng *engine) maybeCreateSnapshot() {
 		return
 	}
 
-	if err := eng.createSnapshot(); err != nil {
+	if job := eng.createSnapshot(); job.err != nil {
 		eng.logger.Errorf(
 			"raft.engine: creating new snapshot at index %s failed: %v",
 			eng.appliedIndex,
-			err,
+			job.err,
 		)
 	}
 }
 
-func (eng *engine) createSnapshot() error {
+func (eng *engine) createSnapshot() snapshotJob {
 	appliedIndex := eng.appliedIndex.Get()
 	snapIndex := eng.snapIndex.Get()
 
 	if appliedIndex == snapIndex {
-		return nil
+		return eng.completedSnapshotJob(eng.cache.Snapshot())
 	}
 
 	if eng.snapshoting.True() {
-		return ErrAlreadySnapshotting
+		return snapshotJob{err: ErrAlreadySnapshotting}
 	}
 
 	eng.snapshoting.Set()
+	confState := cloneConfState(eng.confState)
+	members := eng.snapshotMembers()
+	done := make(chan snapshotResult, 1)
+	eng.wg.Add(1)
+	go func() {
+		defer eng.wg.Done()
+		snap, err := eng.writeSnapshot(appliedIndex, snapIndex, confState, members)
+		if err != nil {
+			eng.snapIndex.Set(snapIndex)
+			eng.logger.Errorf(
+				"raft.engine: creating new snapshot at index %s failed: %v",
+				eng.appliedIndex,
+				err,
+			)
+		}
+		done <- snapshotResult{snap: snap, err: err}
+	}()
+	return snapshotJob{done: done}
+}
 
+func cloneConfState(confState *etcdraftpb.ConfState) *etcdraftpb.ConfState {
+	if confState == nil {
+		return nil
+	}
+	cs := *confState
+	cs.Voters = append([]uint64(nil), confState.Voters...)
+	cs.Learners = append([]uint64(nil), confState.Learners...)
+	cs.VotersOutgoing = append([]uint64(nil), confState.VotersOutgoing...)
+	cs.LearnersNext = append([]uint64(nil), confState.LearnersNext...)
+	cs.AutoLeave = confState.AutoLeave
+	return &cs
+}
+
+func (eng *engine) snapshotMembers() []raftpb.Member {
+	if eng.pool == nil {
+		return nil
+	}
+	return eng.pool.Snapshot()
+}
+
+func (eng *engine) completedSnapshotJob(snap etcdraftpb.Snapshot, err error) snapshotJob {
+	done := make(chan snapshotResult, 1)
+	done <- snapshotResult{snap: snap, err: err}
+	return snapshotJob{done: done}
+}
+
+func (eng *engine) writeSnapshot(
+	appliedIndex uint64,
+	snapIndex uint64,
+	confState *etcdraftpb.ConfState,
+	members []raftpb.Member,
+) (etcdraftpb.Snapshot, error) {
+	defer eng.snapshoting.UnSet()
 	r, err := eng.fsm.Snapshot()
 	if err != nil {
-		eng.snapshoting.UnSet()
-		return err
+		return etcdraftpb.Snapshot{}, err
 	}
 
 	eng.logger.Infof(
@@ -815,59 +892,40 @@ func (eng *engine) createSnapshot() error {
 		snapIndex,
 	)
 
-	snap, err := eng.cache.CreateSnapshot(appliedIndex, eng.confState, nil)
+	snap, err := eng.cache.CreateSnapshot(appliedIndex, confState, nil)
 	if err != nil {
-		eng.snapshoting.UnSet()
-		return err
+		return etcdraftpb.Snapshot{}, err
 	}
 
 	ss := storage.Snapshot{
 		SnapshotState: raftpb.SnapshotState{
 			Raw:     snap,
-			Members: eng.pool.Snapshot(),
+			Members: members,
 		},
 		Data: r,
 	}
 
+	if err := eng.storage.Snapshotter().Write(&ss); err != nil {
+		return etcdraftpb.Snapshot{}, err
+	}
+
 	if err := eng.storage.SaveSnapshot(snap); err != nil {
-		return err
+		return etcdraftpb.Snapshot{}, err
 	}
 
-	fn := func() error {
-		defer eng.snapshoting.UnSet()
+	eng.snapIndex.Set(appliedIndex)
 
-		if err := eng.storage.Snapshotter().Write(&ss); err != nil {
-			return err
-		}
-
-		eng.snapIndex.Set(appliedIndex)
-
-		if appliedIndex <= eng.cfg.SnapInterval() {
-			return nil
-		}
-
-		compactIndex := appliedIndex - eng.cfg.SnapInterval()
-		if err := eng.cache.Compact(compactIndex); err != nil {
-			return err
-		}
-
-		eng.logger.Infof("raft.engine: compacted log at index %d", compactIndex)
-		return nil
+	if appliedIndex <= eng.cfg.SnapInterval() {
+		return snap, nil
 	}
 
-	eng.wg.Add(1)
-	go func() {
-		defer eng.wg.Done()
-		if err := fn(); err != nil {
-			eng.snapIndex.Set(snapIndex)
-			eng.logger.Errorf(
-				"raft.engine: creating new snapshot at index %s failed: %v",
-				eng.appliedIndex,
-				err,
-			)
-		}
-	}()
-	return nil
+	compactIndex := appliedIndex - eng.cfg.SnapInterval()
+	if err := eng.cache.Compact(compactIndex); err != nil {
+		return etcdraftpb.Snapshot{}, err
+	}
+
+	eng.logger.Infof("raft.engine: compacted log at index %d", compactIndex)
+	return snap, nil
 }
 
 func (eng *engine) wait(ctx context.Context, id uint64) error {
